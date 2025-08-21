@@ -1,6 +1,6 @@
 // FinanceFlow - Modern Cards Screen
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, FlatList, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, FlatList, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -779,7 +779,12 @@ const CardsScreen = ({ navigation }) => {
         presentationStyle="pageSheet"
         onRequestClose={() => setAddCardModalVisible(false)}
       >
-        <SafeAreaView style={styles.modalContainer}>
+        <KeyboardAvoidingView 
+          style={styles.modalContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -200}
+        >
+          <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <TouchableOpacity 
               onPress={() => setAddCardModalVisible(false)} 
@@ -794,7 +799,12 @@ const CardsScreen = ({ navigation }) => {
             <View style={styles.placeholder} />
           </View>
 
-          <ScrollView style={styles.addCardForm} showsVerticalScrollIndicator={false}>
+          <ScrollView 
+            style={styles.addCardForm} 
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            bounces={false}
+          >
             <View style={styles.formSection}>
               <Text style={styles.formLabel}>Kart/Hesap Adı</Text>
               <TextInput
@@ -896,7 +906,8 @@ const CardsScreen = ({ navigation }) => {
               </LinearGradient>
             </TouchableOpacity>
           </ScrollView>
-        </SafeAreaView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Balance Update Modal */}
@@ -906,7 +917,12 @@ const CardsScreen = ({ navigation }) => {
         presentationStyle="pageSheet"
         onRequestClose={() => setBalanceUpdateModalVisible(false)}
       >
-        <SafeAreaView style={styles.modalContainer}>
+        <KeyboardAvoidingView 
+          style={styles.modalContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -200}
+        >
+          <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <TouchableOpacity 
               onPress={() => setBalanceUpdateModalVisible(false)} 
@@ -957,7 +973,8 @@ const CardsScreen = ({ navigation }) => {
               </LinearGradient>
             </TouchableOpacity>
           </ScrollView>
-        </SafeAreaView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Payment Reminder Modal */}
@@ -967,7 +984,12 @@ const CardsScreen = ({ navigation }) => {
         presentationStyle="pageSheet"
         onRequestClose={() => setPaymentReminderModalVisible(false)}
       >
-        <SafeAreaView style={styles.modalContainer}>
+        <KeyboardAvoidingView 
+          style={styles.modalContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -200}
+        >
+          <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <TouchableOpacity 
               onPress={() => setPaymentReminderModalVisible(false)} 
@@ -1031,7 +1053,8 @@ const CardsScreen = ({ navigation }) => {
               </TouchableOpacity>
             </View>
           </View>
-        </SafeAreaView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

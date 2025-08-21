@@ -12,27 +12,41 @@ import { goldCurrencyData, goldCurrencyFunctions } from '../../utils/goldCurrenc
 import { formatCurrency } from '../../utils/formatters';
 import DetailedAddTransactionModal from '../modals/DetailedAddTransactionModal';
 import ReceiptScannerModal from '../modals/ReceiptScannerModal';
+import { transactionStorage } from '../../utils/storage';
+import { LoadingScreen, EmptyState } from '../../components/ui/LoadingScreen';
 
 const { width, height } = Dimensions.get('window');
-const TOP_CARD_WIDTH = width - theme.spacing.lg * 2;
-const TOP_CARD_GAP = theme.spacing.md;
-const SIDE_INSET = (width - TOP_CARD_WIDTH) / 2;
+// Kart genişliği - tam ekran genişlik
+const CARD_WIDTH = width; // Tam ekran genişlik
+const CARD_GAP = 0; // Kartlar arası boşluk yok
+const TOTAL_CARD_WIDTH = CARD_WIDTH;
 
 const HomeScreen = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [showBalance, setShowBalance] = useState(true);
+  const [showAssets, setShowAssets] = useState(true);
   const [addTransactionVisible, setAddTransactionVisible] = useState(false);
   const [transactionType, setTransactionType] = useState('expense');
   const [receiptScannerVisible, setReceiptScannerVisible] = useState(false);
   const [fabMenuVisible, setFabMenuVisible] = useState(false);
   const [balanceSettingsVisible, setBalanceSettingsVisible] = useState(false);
+  const [assetsSettingsVisible, setAssetsSettingsVisible] = useState(false);
+  // Toplam Bakiye için ayarlar
   const [includeCashAccounts, setIncludeCashAccounts] = useState(true);
   const [includeSavings, setIncludeSavings] = useState(true);
   const [includeCreditAvailable, setIncludeCreditAvailable] = useState(false);
   const [includeGoldCurrency, setIncludeGoldCurrency] = useState(false);
+  
+  // Varlıklarım için ayrı ayarlar
+  const [assetsIncludeCashAccounts, setAssetsIncludeCashAccounts] = useState(true);
+  const [assetsIncludeSavings, setAssetsIncludeSavings] = useState(true);
+  const [assetsIncludeCreditAvailable, setAssetsIncludeCreditAvailable] = useState(false);
+  const [assetsIncludeGoldCurrency, setAssetsIncludeGoldCurrency] = useState(false);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
-  const topScrollRef = useRef(null);
+  const horizontalScrollRef = useRef(null);
 
   const getCashAccountsTotal = () => testUser.accounts
     .filter(a => a.type === 'debit' || a.type === 'checking')
@@ -49,6 +63,7 @@ const HomeScreen = ({ navigation }) => {
   const getGoldCurrencyTotalTRY = () => goldCurrencyFunctions.getTotalGoldValue();
 
   useEffect(() => {
+    loadTransactions();
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -63,9 +78,22 @@ const HomeScreen = ({ navigation }) => {
     ]).start();
   }, []);
 
-  const onRefresh = () => {
+  const loadTransactions = async () => {
+    try {
+      setLoading(true);
+      const storedTransactions = await transactionStorage.getTransactions();
+      setTransactions(storedTransactions);
+    } catch (error) {
+      console.error('Error loading transactions:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 2000);
+    await loadTransactions();
+    setRefreshing(false);
   };
 
 
@@ -80,7 +108,11 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const getRecentTransactions = () => {
-    return testUser.transactions.slice(0, 3);
+    return transactions.slice(0, 3);
+  };
+
+  const handleTransactionAdded = (newTransaction) => {
+    setTransactions(prev => [newTransaction, ...prev]);
   };
 
   const renderFABMenu = () => {
@@ -140,10 +172,19 @@ const HomeScreen = ({ navigation }) => {
     ];
 
     return (
-      <View style={styles.fabContainer}>
-        {/* FAB Menu Items */}
+      <View style={styles.fabContainer} pointerEvents="box-none">
+        {/* Backdrop - ARKADA OLMALI */}
         {fabMenuVisible && (
-          <View style={styles.fabMenuContainer}>
+          <TouchableOpacity
+            style={styles.fabBackdrop}
+            onPress={() => setFabMenuVisible(false)}
+            activeOpacity={1}
+          />
+        )}
+
+        {/* FAB Menu Items - ÖNDE */}
+        {fabMenuVisible && (
+          <View style={styles.fabMenuContainer} pointerEvents="box-none">
             {fabMenuItems.map((item, index) => (
               <Animated.View
                 key={`fab-menu-${item.id}`}
@@ -156,12 +197,16 @@ const HomeScreen = ({ navigation }) => {
                         : 0
                     }],
                     opacity: fabMenuVisible ? 1 : 0,
+                    zIndex: 2,
+                    elevation: 6,
                   }
                 ]}
               >
                 <TouchableOpacity
                   style={styles.fabMenuButton}
                   onPress={item.onPress}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  activeOpacity={0.8}
                 >
                   <View style={styles.fabMenuLabelContainer}>
                     <Text style={styles.fabMenuLabel}>{item.label}</Text>
@@ -175,9 +220,9 @@ const HomeScreen = ({ navigation }) => {
           </View>
         )}
 
-        {/* Main FAB */}
+        {/* Main FAB - EN ÖNDE */}
         <TouchableOpacity 
-          style={styles.fab}
+          style={[styles.fab, { zIndex: 3, elevation: 8 }]}
           onPress={() => setFabMenuVisible(!fabMenuVisible)}
         >
           <LinearGradient
@@ -197,15 +242,6 @@ const HomeScreen = ({ navigation }) => {
             </Animated.View>
           </LinearGradient>
         </TouchableOpacity>
-
-        {/* Backdrop */}
-        {fabMenuVisible && (
-          <TouchableOpacity
-            style={styles.fabBackdrop}
-            onPress={() => setFabMenuVisible(false)}
-            activeOpacity={1}
-          />
-        )}
       </View>
     );
   };
@@ -234,16 +270,52 @@ const HomeScreen = ({ navigation }) => {
   const totalBalance = getTotalBalance();
   const recentTransactions = getRecentTransactions();
 
-  const getCategoryIcon = (categoryId) => {
-    const allCategories = [...testUser.categories.income, ...testUser.categories.expense];
-    const category = allCategories.find(cat => cat.id === categoryId);
-    return category ? category.icon : 'category';
-  };
+  // Varlıklarım kartı için kalem bazlı özet
+  const assetsBreakdown = [
+    {
+      id: 'cash',
+      label: 'Nakit/Vadesiz',
+      icon: 'account-balance-wallet',
+      enabled: assetsIncludeCashAccounts,
+      amount: getCashAccountsTotal(),
+      color: '#6C63FF',
+    },
+    {
+      id: 'savings',
+      label: 'Tasarruf',
+      icon: 'savings',
+      enabled: assetsIncludeSavings,
+      amount: getSavingsTotal(),
+      color: '#4ECDC4',
+    },
+    {
+      id: 'credit',
+      label: 'Kredi Limit',
+      icon: 'credit-card',
+      enabled: assetsIncludeCreditAvailable,
+      amount: getCreditAvailableTotal(),
+      color: '#ED8936',
+    },
+    {
+      id: 'gold',
+      label: 'Altın & Döviz',
+      icon: 'star',
+      enabled: assetsIncludeGoldCurrency,
+      amount: getGoldCurrencyTotalTRY(),
+      color: '#FFE66D',
+    },
+  ];
 
   const getCategoryName = (categoryId) => {
     const allCategories = [...testUser.categories.income, ...testUser.categories.expense];
     const category = allCategories.find(cat => cat.id === categoryId);
     return category ? category.name : 'Kategori';
+  };
+
+  const getCategoryIcon = (categoryId) => {
+    const allCategories = [...testUser.categories.income, ...testUser.categories.expense];
+    const category = allCategories.find(cat => cat.id === categoryId);
+    return category ? category.icon : 'category';
   };
 
   const renderQuickActionButton = (icon, label, color, onPress) => (
@@ -259,6 +331,10 @@ const HomeScreen = ({ navigation }) => {
       <Text style={styles.quickActionLabel}>{label}</Text>
     </TouchableOpacity>
   );
+
+  if (loading) {
+    return <LoadingScreen message="Veriler yükleniyor..." />;
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -285,25 +361,24 @@ const HomeScreen = ({ navigation }) => {
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            ref={topScrollRef}
-            snapToInterval={TOP_CARD_WIDTH + TOP_CARD_GAP}
+            ref={horizontalScrollRef}
+            pagingEnabled={true}
+            snapToInterval={CARD_WIDTH}
             decelerationRate="fast"
+            snapToAlignment="start"
             contentContainerStyle={[styles.topCardsContainer, { paddingVertical: theme.spacing.sm }]}
+            scrollEventThrottle={16}
+            bounces={false}
             onMomentumScrollEnd={(e) => {
               const x = e.nativeEvent.contentOffset.x;
-              const index = Math.round(x / (TOP_CARD_WIDTH + TOP_CARD_GAP));
-              topScrollRef.current?.scrollTo({ x: index * (TOP_CARD_WIDTH + TOP_CARD_GAP), animated: true });
-            }}
-            onScrollEndDrag={(e) => {
-              const x = e.nativeEvent.contentOffset.x;
-              const index = Math.round(x / (TOP_CARD_WIDTH + TOP_CARD_GAP));
-              topScrollRef.current?.scrollTo({ x: index * (TOP_CARD_WIDTH + TOP_CARD_GAP), animated: true });
+              const index = Math.round(x / CARD_WIDTH);
+              horizontalScrollRef.current?.scrollTo({ x: index * CARD_WIDTH, animated: true });
             }}
           >
             {/* Toplam Bakiye */}
             <LinearGradient
               colors={[theme.colors.primary, theme.colors.secondary]}
-              style={[styles.balanceCard, styles.topCard, { width: TOP_CARD_WIDTH }]}
+              style={[styles.balanceCard, styles.topCard, { width: CARD_WIDTH }]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
@@ -336,18 +411,43 @@ const HomeScreen = ({ navigation }) => {
             {/* Varlıklarım */}
             <LinearGradient
               colors={[theme.colors.secondary, theme.colors.primary]}
-              style={[styles.balanceCard, styles.assetsCard, styles.topCard, { width: TOP_CARD_WIDTH }]}
+              style={[styles.balanceCard, styles.assetsCard, styles.topCard, { width: CARD_WIDTH }]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
               <View style={styles.balanceHeader}>
                 <Text style={styles.balanceLabel}>Varlıklarım</Text>
-                <MaterialIcons name="account-balance" size={20} color="rgba(255,255,255,0.9)" />
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TouchableOpacity onPress={() => setAssetsSettingsVisible(true)} style={styles.balanceSettingsButton}>
+                    <MaterialIcons name="tune" size={20} color="rgba(255,255,255,0.9)" />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setShowAssets(!showAssets)}>
+                    <MaterialIcons name={showAssets ? 'visibility' : 'visibility-off'} size={20} color="rgba(255,255,255,0.8)" />
+                  </TouchableOpacity>
+                </View>
               </View>
               <Text style={styles.balanceAmount}>
-                {formatCurrency(getCashAccountsTotal() + getSavingsTotal() + getGoldCurrencyTotalTRY())}
+                {showAssets ? formatCurrency(
+                  (assetsIncludeCashAccounts ? getCashAccountsTotal() : 0) +
+                  (assetsIncludeSavings ? getSavingsTotal() : 0) +
+                  (assetsIncludeCreditAvailable ? getCreditAvailableTotal() : 0) +
+                  (assetsIncludeGoldCurrency ? getGoldCurrencyTotalTRY() : 0)
+                ) : '••••••'}
               </Text>
-              <Text style={styles.assetsSubtitle}>Nakit, Tasarruf ve Altın/Döviz</Text>
+              <Text style={styles.assetsSubtitle}>Dahil edilenler</Text>
+              {showAssets && (
+                <View style={styles.assetsBreakdownContainer}>
+                  {assetsBreakdown.filter(b => b.enabled).map(item => (
+                    <View key={item.id} style={styles.assetChip}>
+                      <View style={[styles.assetChipIcon, { backgroundColor: item.color }]}>
+                        <MaterialIcons name={item.icon} size={14} color="#fff" />
+                      </View>
+                      <Text style={styles.assetChipLabel}>{item.label}</Text>
+                      <Text style={styles.assetChipAmount}>{formatCurrency(item.amount)}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             </LinearGradient>
           </ScrollView>
         </Animated.View>
@@ -438,6 +538,80 @@ const HomeScreen = ({ navigation }) => {
           </View>
         </View>
 
+        {/* Sabit Gelir ve Giderler Özeti */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Sabit Gelir & Giderler</Text>
+          <View style={styles.recurringContainer}>
+            {/* Sabit Gelirler */}
+            <View style={styles.recurringSection}>
+              <View style={styles.recurringHeader}>
+                <MaterialIcons name="trending-up" size={20} color="#48BB78" />
+                <Text style={styles.recurringSectionTitle}>Sabit Gelirler</Text>
+                <Text style={styles.recurringTotal}>
+                  +{formatCurrency(testUser.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0))}
+                </Text>
+              </View>
+              <View style={styles.recurringItems}>
+                {testUser.recurringTransactions.income.map(item => (
+                  <View key={item.id} style={styles.recurringItem}>
+                    <View style={styles.recurringItemIcon}>
+                      <MaterialIcons name={item.icon} size={16} color={item.color} />
+                    </View>
+                    <Text style={styles.recurringItemLabel}>{item.description}</Text>
+                    <Text style={[styles.recurringItemAmount, { color: '#48BB78' }]}>
+                      +{formatCurrency(item.amount)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* Sabit Giderler */}
+            <View style={styles.recurringSection}>
+              <View style={styles.recurringHeader}>
+                <MaterialIcons name="trending-down" size={20} color="#F56565" />
+                <Text style={styles.recurringSectionTitle}>Sabit Giderler</Text>
+                <Text style={styles.recurringTotal}>
+                  -{formatCurrency(testUser.recurringTransactions.expenses.reduce((sum, item) => sum + item.amount, 0))}
+                </Text>
+              </View>
+              <View style={styles.recurringItems}>
+                {testUser.recurringTransactions.expenses.map(item => (
+                  <View key={item.id} style={styles.recurringItem}>
+                    <View style={styles.recurringItemIcon}>
+                      <MaterialIcons name={item.icon} size={16} color={item.color} />
+                    </View>
+                    <Text style={styles.recurringItemLabel}>{item.description}</Text>
+                    <Text style={[styles.recurringItemAmount, { color: '#F56565' }]}>
+                      -{formatCurrency(item.amount)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* Net Durum */}
+            <View style={styles.netBalanceContainer}>
+              <Text style={styles.netBalanceLabel}>Net Durum</Text>
+              <Text style={[
+                styles.netBalanceAmount,
+                { 
+                  color: (testUser.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) - 
+                          testUser.recurringTransactions.expenses.reduce((sum, item) => sum + item.amount, 0)) >= 0 
+                    ? '#48BB78' : '#F56565' 
+                }
+              ]}>
+                {(testUser.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) - 
+                  testUser.recurringTransactions.expenses.reduce((sum, item) => sum + item.amount, 0)) >= 0 ? '+' : ''}
+                {formatCurrency(
+                  testUser.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) - 
+                  testUser.recurringTransactions.expenses.reduce((sum, item) => sum + item.amount, 0)
+                )}
+              </Text>
+            </View>
+          </View>
+        </View>
+
         {/* Altın & Döviz kısayolu halen Hızlı İşlemlerden erişilebilir */}
 
         {/* Goals Progress */}
@@ -482,6 +656,7 @@ const HomeScreen = ({ navigation }) => {
         visible={addTransactionVisible}
         onClose={() => setAddTransactionVisible(false)}
         type={transactionType}
+        onTransactionAdded={handleTransactionAdded}
       />
 
       <ReceiptScannerModal
@@ -510,20 +685,68 @@ const HomeScreen = ({ navigation }) => {
           </View>
 
           <View style={styles.settingsRow}>
-            <Text style={styles.settingsLabel}>Vadesiz/Nakit Hesaplar</Text>
-            <Switch value={includeCashAccounts} onValueChange={setIncludeCashAccounts} />
-          </View>
-          <View style={styles.settingsRow}>
-            <Text style={styles.settingsLabel}>Tasarruf Hesapları</Text>
-            <Switch value={includeSavings} onValueChange={setIncludeSavings} />
-          </View>
-          <View style={styles.settingsRow}>
-            <Text style={styles.settingsLabel}>Kredi Kartı Kullanılabilir Limit</Text>
-            <Switch value={includeCreditAvailable} onValueChange={setIncludeCreditAvailable} />
-          </View>
-          <View style={styles.settingsRow}>
             <Text style={styles.settingsLabel}>Altın & Döviz</Text>
             <Switch value={includeGoldCurrency} onValueChange={setIncludeGoldCurrency} />
+          </View>
+          
+          {/* Varlık Ayarları Bölümü */}
+          <View style={styles.settingsSection}>
+            <Text style={styles.settingsSectionTitle}>Varlık Kalemleri</Text>
+            <View style={styles.settingsRow}>
+              <Text style={styles.settingsLabel}>Nakit & Vadesiz Hesaplar</Text>
+              <Switch value={includeCashAccounts} onValueChange={setIncludeCashAccounts} />
+            </View>
+            <View style={styles.settingsRow}>
+              <Text style={styles.settingsLabel}>Tasarruf Hesapları</Text>
+              <Switch value={includeSavings} onValueChange={setIncludeSavings} />
+            </View>
+            <View style={styles.settingsRow}>
+              <Text style={styles.settingsLabel}>Kredi Kartı Kullanılabilir Limit</Text>
+              <Switch value={includeCreditAvailable} onValueChange={setIncludeCreditAvailable} />
+            </View>
+            <View style={styles.settingsRow}>
+              <Text style={styles.settingsLabel}>Altın & Döviz</Text>
+              <Switch value={includeGoldCurrency} onValueChange={setIncludeGoldCurrency} />
+            </View>
+          </View>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Varlıklar Ayarları Modal */}
+      <Modal
+        visible={assetsSettingsVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setAssetsSettingsVisible(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setAssetsSettingsVisible(false)} style={styles.closeButton}>
+              <MaterialIcons name="close" size={24} color={theme.colors.textPrimary} />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Varlık Ayarları</Text>
+            <View style={{ width: 40 }} />
+          </View>
+
+          {/* Varlık Kalemleri Bölümü */}
+          <View style={styles.settingsSection}>
+            <Text style={styles.settingsSectionTitle}>Varlık Kalemleri</Text>
+            <View style={styles.settingsRow}>
+              <Text style={styles.settingsLabel}>Nakit & Vadesiz Hesaplar</Text>
+              <Switch value={assetsIncludeCashAccounts} onValueChange={setAssetsIncludeCashAccounts} />
+            </View>
+            <View style={styles.settingsRow}>
+              <Text style={styles.settingsLabel}>Tasarruf Hesapları</Text>
+              <Switch value={assetsIncludeSavings} onValueChange={setAssetsIncludeSavings} />
+            </View>
+            <View style={styles.settingsRow}>
+              <Text style={styles.settingsLabel}>Kredi Kartı Kullanılabilir Limit</Text>
+              <Switch value={assetsIncludeCreditAvailable} onValueChange={setAssetsIncludeCreditAvailable} />
+            </View>
+            <View style={styles.settingsRow}>
+              <Text style={styles.settingsLabel}>Altın & Döviz</Text>
+              <Switch value={assetsIncludeGoldCurrency} onValueChange={setAssetsIncludeGoldCurrency} />
+            </View>
           </View>
         </SafeAreaView>
       </Modal>
@@ -579,7 +802,7 @@ const styles = StyleSheet.create({
   },
 
   balanceCard: {
-    marginHorizontal: theme.spacing.lg,
+    marginHorizontal: 0, // Margin'i kaldırdım çünkü container'da padding var
     marginBottom: theme.spacing.xl,
     borderRadius: theme.borderRadius.lg,
     padding: theme.spacing.xl,
@@ -588,6 +811,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+    // Kartların daha iyi görünmesi için
+    minHeight: 180,
+    justifyContent: 'space-between',
   },
 
   balanceHeader: {
@@ -834,11 +1060,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 90,
     right: theme.spacing.lg,
+    left: 0,
+    top: 0,
   },
   fabMenuContainer: {
     position: 'absolute',
     bottom: 0,
     right: 0,
+    zIndex: 2,
   },
   fabMenuItem: {
     position: 'absolute',
@@ -856,11 +1085,11 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.xs,
     borderRadius: theme.borderRadius.lg,
     marginRight: theme.spacing.sm,
-    elevation: 4,
+    elevation: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
   },
   fabMenuLabel: {
     color: '#ffffff',
@@ -880,11 +1109,15 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   fab: {
-    elevation: 8,
+    elevation: 10,
     shadowColor: theme.colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    zIndex: 3,
   },
   fabGradient: {
     width: 56,
@@ -900,6 +1133,7 @@ const styles = StyleSheet.create({
     width: width * 2,
     height: height * 2,
     backgroundColor: 'transparent',
+    zIndex: 1,
   },
 
   goldCurrencyScroll: {
@@ -1030,11 +1264,27 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     fontWeight: '600',
   },
+  settingsSection: {
+    marginTop: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
+  settingsSectionTitle: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+    marginBottom: theme.spacing.sm,
+  },
   topCardsContainer: {
     paddingVertical: theme.spacing.sm,
+    paddingHorizontal: 0, // Sol margin kaldırıldı - tam ekran için
   },
   topCard: {
-    marginRight: TOP_CARD_GAP,
+    marginRight: 0, // Kartlar arası boşluk yok
+    // Kartların daha iyi görünmesi için
+    minHeight: 180,
   },
   assetsCard: {
     backgroundColor: 'transparent',
@@ -1044,6 +1294,176 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  assetsBreakdownContainer: {
+    marginTop: theme.spacing.md,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: theme.borderRadius.md,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+  },
+  assetChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+  },
+  assetChipIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing.sm,
+  },
+  assetChipLabel: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.95)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  assetChipAmount: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+    marginLeft: theme.spacing.md,
+  },
+  recurringContainer: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.md,
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.md,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  recurringSection: {
+    marginBottom: theme.spacing.md,
+  },
+  recurringHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.sm,
+  },
+  recurringHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  recurringHeaderIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: theme.spacing.sm,
+  },
+  recurringSectionTitle: {
+    fontSize: 16,
+    color: theme.colors.textPrimary,
+    fontWeight: '600',
+    flex: 1,
+    marginLeft: theme.spacing.sm,
+  },
+  recurringSubtitle: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 2,
+  },
+  recurringTotal: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+  },
+  recurringItems: {
+    marginLeft: theme.spacing.sm,
+  },
+  recurringItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.xs,
+    paddingVertical: theme.spacing.xs,
+  },
+  recurringItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  recurringItemIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: theme.spacing.sm,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  recurringItemInfo: {
+    flex: 1,
+  },
+  recurringItemLabel: {
+    fontSize: 13,
+    color: theme.colors.textPrimary,
+    fontWeight: '600',
+    flex: 1,
+  },
+  recurringItemCategory: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 2,
+  },
+  recurringItemRight: {
+    alignItems: 'flex-end',
+  },
+  recurringItemAmount: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  recurringItemFrequency: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 2,
+  },
+  netBalanceContainer: {
+    marginTop: theme.spacing.md,
+    paddingTop: theme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.2)',
+  },
+  netBalanceLabel: {
+    fontSize: 14,
+    color: theme.colors.textPrimary,
+    fontWeight: '600',
+    marginLeft: theme.spacing.sm,
+  },
+  netBalanceAmount: {
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: theme.spacing.xs,
+  },
+  netBalanceBreakdown: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: theme.spacing.xs,
+  },
+  netBalanceItem: {
+    alignItems: 'center',
+  },
+  netBalanceItemLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: '500',
+  },
+  netBalanceItemValue: {
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
 

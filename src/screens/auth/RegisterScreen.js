@@ -1,6 +1,6 @@
 // FinanceFlow - Modern Register Screen
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, Animated, KeyboardAvoidingView, Platform, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, Animated, KeyboardAvoidingView, Platform, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -8,27 +8,40 @@ import { theme } from '../../styles/theme';
 import { globalStyles } from '../../styles/globalStyles';
 import CustomButton from '../../components/ui/CustomButton';
 import TermsModal from '../../components/ui/TermsModal';
+import { useAuth } from '../../context/AuthContext';
 
 const { width, height } = Dimensions.get('window');
 
 const RegisterScreen = ({ navigation }) => {
+  const { register, checkUserExists } = useAuth();
+  const [currentStep, setCurrentStep] = useState(1);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
     email: '',
     password: '',
     confirmPassword: '',
+    agreeToTerms: false
   });
-  const [loading, setLoading] = useState(false);
-  const [acceptTerms, setAcceptTerms] = useState(false);
-  const [termsModalVisible, setTermsModalVisible] = useState(false);
-  const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  
+  // Input refs
+  const firstNameInputRef = useRef(null);
+  const lastNameInputRef = useRef(null);
+  const emailInputRef = useRef(null);
+  const passwordInputRef = useRef(null);
+  const confirmPasswordInputRef = useRef(null);
   
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
+  const progressAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // Entry animations
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -40,8 +53,22 @@ const RegisterScreen = ({ navigation }) => {
         duration: 600,
         useNativeDriver: true,
       }),
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
     ]).start();
-  }, []);
+
+    // Progress animation
+    Animated.timing(progressAnim, {
+      toValue: (currentStep / 3) * 100,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+  }, [currentStep]);
+
+
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({
@@ -50,15 +77,61 @@ const RegisterScreen = ({ navigation }) => {
     }));
   };
 
+  const validateStep = (step) => {
+    switch (step) {
+      case 1:
+        return formData.firstName.trim() && formData.lastName.trim();
+      case 2:
+        return formData.email.trim() && formData.password.length >= 6;
+      case 3:
+        return formData.password === formData.confirmPassword && formData.agreeToTerms;
+      default:
+        return false;
+    }
+  };
+
+  const nextStep = () => {
+    if (validateStep(currentStep)) {
+      if (currentStep < 3) {
+        setCurrentStep(currentStep + 1);
+      } else {
+        handleRegister();
+      }
+    } else {
+      Alert.alert('Hata', 'Lütfen tüm alanları doldurun');
+    }
+  };
+
+  const prevStep = () => {
+    if (currentStep > 1) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
+
   const handleRegister = async () => {
+    if (!validateStep(3)) {
+      Alert.alert('Hata', 'Lütfen tüm alanları doldurun ve şartları kabul edin');
+      return;
+    }
+
     setLoading(true);
-    // TODO: Implement real registration logic
-    setTimeout(() => {
+    
+    try {
+      const result = await register(formData);
+      
+      if (result.success) {
+        Alert.alert('Başarılı', 'Hesabınız başarıyla oluşturuldu!', [
+          { text: 'Tamam', onPress: () => navigation.navigate('Login') }
+        ]);
+      } else {
+        Alert.alert('Kayıt Hatası', result.error);
+      }
+    } catch (error) {
+      Alert.alert('Hata', 'Kayıt olurken bir hata oluştu');
+      console.error('Registration error:', error);
+    } finally {
       setLoading(false);
-      // Registration successful
-      // Navigate to main app after successful registration
-      navigation.replace('Main');
-    }, 2000);
+    }
   };
 
   const handleLogin = () => {
@@ -69,20 +142,191 @@ const RegisterScreen = ({ navigation }) => {
     setAcceptTerms(!acceptTerms);
   };
 
+  const renderStep1 = () => (
+    <>
+      {/* Name Fields Row */}
+      <View style={styles.row}>
+        <View style={[styles.inputContainer, styles.halfInput]}>
+          <View style={styles.glassInputWrapper}>
+            <MaterialIcons 
+              name="person" 
+              size={20} 
+              color="rgba(255,255,255,0.8)" 
+              style={styles.inputIcon}
+            />
+            <TextInput
+              ref={firstNameInputRef}
+              value={formData.firstName}
+              onChangeText={(value) => handleInputChange('firstName', value)}
+              placeholder="Adınız"
+              placeholderTextColor="rgba(255,255,255,0.6)"
+              style={styles.directInput}
+              autoCapitalize="words"
+
+              returnKeyType="next"
+              onSubmitEditing={() => lastNameInputRef.current?.focus()}
+            />
+          </View>
+        </View>
+
+        <View style={[styles.inputContainer, styles.halfInput]}>
+          <View style={styles.glassInputWrapper}>
+            <TextInput
+              ref={lastNameInputRef}
+              value={formData.lastName}
+              onChangeText={(value) => handleInputChange('lastName', value)}
+              placeholder="Soyadınız"
+              placeholderTextColor="rgba(255,255,255,0.6)"
+              style={styles.directInput}
+              autoCapitalize="words"
+
+              returnKeyType="next"
+              onSubmitEditing={() => nextStep()}
+            />
+          </View>
+        </View>
+      </View>
+    </>
+  );
+
+  const renderStep2 = () => (
+    <>
+      {/* Email */}
+      <View style={styles.inputContainer}>
+        <View style={styles.glassInputWrapper}>
+          <MaterialIcons 
+            name="email" 
+            size={20} 
+            color="rgba(255,255,255,0.8)" 
+            style={styles.inputIcon}
+          />
+          <TextInput
+            ref={emailInputRef}
+            value={formData.email}
+            onChangeText={(value) => handleInputChange('email', value)}
+            placeholder="E-posta adresiniz"
+            placeholderTextColor="rgba(255,255,255,0.6)"
+            keyboardType="email-address"
+            style={styles.directInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+
+            returnKeyType="next"
+            onSubmitEditing={() => passwordInputRef.current?.focus()}
+          />
+        </View>
+      </View>
+
+      {/* Password */}
+      <View style={styles.inputContainer}>
+        <View style={styles.glassInputWrapper}>
+          <MaterialIcons 
+            name="lock" 
+            size={20} 
+            color="rgba(255,255,255,0.8)" 
+            style={styles.inputIcon}
+          />
+          <TextInput
+            ref={passwordInputRef}
+            value={formData.password}
+            onChangeText={(value) => handleInputChange('password', value)}
+            placeholder="Şifreniz (en az 6 karakter)"
+            placeholderTextColor="rgba(255,255,255,0.6)"
+            secureTextEntry={!showPassword}
+            style={styles.directInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+
+            returnKeyType="next"
+            onSubmitEditing={() => nextStep()}
+          />
+          <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
+            <MaterialIcons 
+              name={showPassword ? "visibility" : "visibility-off"} 
+              size={20} 
+              color="rgba(255,255,255,0.8)" 
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </>
+  );
+
+  const renderStep3 = () => (
+    <>
+      {/* Confirm Password */}
+      <View style={styles.inputContainer}>
+        <View style={styles.glassInputWrapper}>
+          <MaterialIcons 
+            name="lock" 
+            size={20} 
+            color="rgba(255,255,255,0.8)" 
+            style={styles.inputIcon}
+          />
+          <TextInput
+            ref={confirmPasswordInputRef}
+            value={formData.confirmPassword}
+            onChangeText={(value) => handleInputChange('confirmPassword', value)}
+            placeholder="Şifrenizi tekrar girin"
+            placeholderTextColor="rgba(255,255,255,0.6)"
+            secureTextEntry={!showConfirmPassword}
+            style={styles.directInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+
+            returnKeyType="done"
+            onSubmitEditing={handleRegister}
+          />
+          <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeIcon}>
+            <MaterialIcons 
+              name={showConfirmPassword ? "visibility" : "visibility-off"} 
+              size={20} 
+              color="rgba(255,255,255,0.8)" 
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Terms Agreement */}
+      <View style={styles.termsContainer}>
+        <TouchableOpacity 
+          style={styles.termsCheckbox}
+          onPress={() => handleInputChange('agreeToTerms', !formData.agreeToTerms)}
+        >
+          <View style={[styles.checkbox, formData.agreeToTerms && styles.checkboxChecked]}>
+            {formData.agreeToTerms && (
+              <MaterialIcons name="check" size={16} color="#ffffff" />
+            )}
+          </View>
+          <Text style={styles.termsText}>
+            <Text style={styles.termsLink}>Kullanım şartları</Text> ve{' '}
+            <Text style={styles.termsLink}>Gizlilik politikası</Text>'nı kabul ediyorum
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
   return (
-    <View style={styles.container}>
-            <LinearGradient 
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -200}
+    >
+      <LinearGradient 
         colors={['#f093fb', '#f5576c']} 
         style={styles.gradientBackground}
         start={{ x: 0, y: 0 }} 
         end={{ x: 1, y: 1 }}
       >
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-          style={styles.keyboardView}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-        >
-          <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea}>
+          <ScrollView 
+            contentContainerStyle={styles.scrollContainer}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            style={styles.scrollView}
+          >
             {/* Background Shapes */}
             <View style={styles.backgroundShapes}>
               <View style={[styles.shape, styles.shape1]} />
@@ -126,173 +370,79 @@ const RegisterScreen = ({ navigation }) => {
               <Text style={styles.subtitleText}>Bilgilerinizi girin</Text>
             </Animated.View>
 
+            {/* Progress Bar */}
+            <View style={styles.progressContainer}>
+              <View style={styles.progressBar}>
+                <Animated.View 
+                  style={[
+                    styles.progressFill,
+                    { width: progressAnim }
+                  ]} 
+                />
+              </View>
+              <Text style={styles.progressText}>Adım {currentStep}/3</Text>
+            </View>
+
             {/* Form Section */}
-            <ScrollView 
-              style={styles.formSection}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.scrollContent}
-            >
-              {/* Name Fields Row */}
-              <View style={styles.row}>
-                <View style={[styles.inputContainer, styles.halfInput]}>
-                  <View style={styles.glassInputWrapper}>
-                    <MaterialIcons 
-                      name="person" 
-                      size={20} 
-                      color="rgba(255,255,255,0.8)" 
-                      style={styles.inputIcon}
-                    />
-                    <TextInput
-                      value={formData.firstName}
-                      onChangeText={(value) => handleInputChange('firstName', value)}
-                      placeholder="Adınız"
-                      placeholderTextColor="rgba(255,255,255,0.6)"
-                      style={styles.directInput}
-                      autoCapitalize="words"
-                    />
-                  </View>
-                </View>
+            <View style={styles.formSection}>
+              {currentStep === 1 && renderStep1()}
+              {currentStep === 2 && renderStep2()}
+              {currentStep === 3 && renderStep3()}
 
-                <View style={[styles.inputContainer, styles.halfInput]}>
-                  <View style={styles.glassInputWrapper}>
-                    <TextInput
-                      value={formData.lastName}
-                      onChangeText={(value) => handleInputChange('lastName', value)}
-                      placeholder="Soyadınız"
-                      placeholderTextColor="rgba(255,255,255,0.6)"
-                      style={styles.directInput}
-                      autoCapitalize="words"
-                    />
-                  </View>
-                </View>
-              </View>
-
-              {/* Email */}
-              <View style={styles.inputContainer}>
-                <View style={styles.glassInputWrapper}>
-                  <MaterialIcons 
-                    name="email" 
-                    size={20} 
-                    color="rgba(255,255,255,0.8)" 
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    value={formData.email}
-                    onChangeText={(value) => handleInputChange('email', value)}
-                    placeholder="E-posta adresiniz"
-                    placeholderTextColor="rgba(255,255,255,0.6)"
-                    keyboardType="email-address"
-                    style={styles.directInput}
-                    autoCapitalize="none"
-                  />
-                </View>
-              </View>
-
-              {/* Password */}
-              <View style={styles.inputContainer}>
-                <View style={styles.glassInputWrapper}>
-                  <MaterialIcons 
-                    name="lock" 
-                    size={20} 
-                    color="rgba(255,255,255,0.8)" 
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    value={formData.password}
-                    onChangeText={(value) => handleInputChange('password', value)}
-                    placeholder="Güçlü bir şifre oluşturun"
-                    placeholderTextColor="rgba(255,255,255,0.6)"
-                    secureTextEntry={true}
-                    style={styles.directInput}
-                    autoCapitalize="none"
-                  />
-                </View>
-              </View>
-
-              {/* Confirm Password */}
-              <View style={styles.inputContainer}>
-                <View style={styles.glassInputWrapper}>
-                  <MaterialIcons 
-                    name="lock" 
-                    size={20} 
-                    color="rgba(255,255,255,0.8)" 
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    value={formData.confirmPassword}
-                    onChangeText={(value) => handleInputChange('confirmPassword', value)}
-                    placeholder="Şifrenizi tekrar girin"
-                    placeholderTextColor="rgba(255,255,255,0.6)"
-                    secureTextEntry={true}
-                    style={styles.directInput}
-                    autoCapitalize="none"
-                  />
-                </View>
-              </View>
-
-              {/* Terms */}
-              <TouchableOpacity 
-                style={styles.termsContainer}
-                onPress={toggleTerms}
-              >
-                <View style={[styles.checkbox, acceptTerms && styles.checkboxActive]}>
-                  {acceptTerms && (
-                    <MaterialIcons 
-                      name="check" 
-                      size={16} 
-                      color="#FFFFFF" 
-                    />
-                  )}
-                </View>
-                <Text style={styles.termsText}>
-                  <Text 
-                    style={styles.termsLink}
-                    onPress={() => setTermsModalVisible(true)}
+              {/* Navigation Buttons */}
+              <View style={styles.navigationButtons}>
+                {currentStep > 1 && (
+                  <TouchableOpacity
+                    style={styles.prevButton}
+                    onPress={prevStep}
+                    activeOpacity={0.8}
                   >
-                    Kullanım Şartları
-                  </Text> ve{' '}
-                  <Text 
-                    style={styles.termsLink}
-                    onPress={() => setPrivacyModalVisible(true)}
-                  >
-                    Gizlilik Politikası
-                  </Text>'nı kabul ediyorum
-                </Text>
-              </TouchableOpacity>
+                    <LinearGradient
+                      colors={['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.1)']}
+                      style={styles.buttonGradient}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                    >
+                      <Text style={styles.buttonText}>Geri</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
 
-              {/* Register Button */}
-              <TouchableOpacity
-                onPress={handleRegister}
-                disabled={loading || !acceptTerms}
-                style={[styles.registerButtonContainer, (!acceptTerms || loading) && styles.buttonDisabled]}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={['rgba(255,255,255,0.25)', 'rgba(255,255,255,0.1)']}
-                  style={styles.registerButtonGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
+                <TouchableOpacity
+                  style={styles.nextButton}
+                  onPress={nextStep}
+                  disabled={loading}
+                  activeOpacity={0.8}
                 >
-                  <Text style={styles.registerButtonText}>
-                    {loading ? 'Hesap oluşturuluyor...' : 'Hesap Oluştur'}
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </ScrollView>
+                  <LinearGradient
+                    colors={['rgba(255,255,255,0.25)', 'rgba(255,255,255,0.1)']}
+                    style={styles.buttonGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                  >
+                    {loading ? (
+                      <Text style={styles.buttonText}>Kayıt olunuyor...</Text>
+                    ) : (
+                      <Text style={styles.buttonText}>
+                        {currentStep === 3 ? 'Kayıt Ol' : 'Devam'}
+                      </Text>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
 
             {/* Footer */}
             <View style={styles.modernFooter}>
               <View style={styles.footerGlass}>
-                <View style={styles.loginContainer}>
-                  <Text style={styles.loginText}>Zaten hesabınız var mı? </Text>
-                  <TouchableOpacity onPress={handleLogin}>
-                    <Text style={styles.loginLink}>Giriş yapın</Text>
-                  </TouchableOpacity>
-                </View>
+                <Text style={styles.footerText}>Zaten hesabınız var mı? </Text>
+                <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+                  <Text style={styles.footerLink}>Giriş yapın</Text>
+                </TouchableOpacity>
               </View>
             </View>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
+          </ScrollView>
+        </SafeAreaView>
       </LinearGradient>
       
       {/* Terms & Privacy Modals */}
@@ -306,7 +456,7 @@ const RegisterScreen = ({ navigation }) => {
         onClose={() => setPrivacyModalVisible(false)}
         type="privacy"
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -319,13 +469,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
-  keyboardView: {
-    flex: 1,
-    justifyContent: 'space-between',
-  },
-  
   safeArea: {
     flex: 1,
+  },
+  
+  scrollView: {
+    flex: 1,
+  },
+  
+  scrollContainer: {
+    flexGrow: 1,
+    minHeight: height,
+    paddingBottom: 100,
   },
   
   backgroundShapes: {
@@ -557,6 +712,110 @@ const styles = StyleSheet.create({
   },
   
   loginLink: {
+    fontSize: 15,
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+
+  // New styles for multi-step form
+  progressContainer: {
+    alignItems: 'center',
+    marginBottom: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.xl,
+  },
+  progressBar: {
+    width: '100%',
+    height: 8,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 4,
+    marginBottom: theme.spacing.xs,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  navigationButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing.xl,
+    marginTop: theme.spacing.lg,
+  },
+  prevButton: {
+    flex: 1,
+    marginRight: theme.spacing.md,
+  },
+  nextButton: {
+    flex: 1,
+    marginLeft: theme.spacing.md,
+  },
+  buttonGradient: {
+    paddingVertical: theme.spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: theme.borderRadius.xl,
+  },
+  buttonText: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  eyeIcon: {
+    position: 'absolute',
+    right: theme.spacing.lg,
+    top: '50%',
+    transform: [{ translateY: -10 }],
+  },
+  termsCheckbox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.xs,
+  },
+  termsText: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.8)',
+    flex: 1,
+    lineHeight: 18,
+  },
+  termsLink: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  checkboxChecked: {
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.8)',
+  },
+  footer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: theme.spacing.xl,
+    paddingBottom: theme.spacing.lg,
+  },
+  footerGlass: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: theme.borderRadius.xl,
+    paddingVertical: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.xl,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.8)',
+    fontWeight: '500',
+  },
+  footerLink: {
     fontSize: 15,
     color: '#FFFFFF',
     fontWeight: '700',

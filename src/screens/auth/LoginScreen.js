@@ -1,21 +1,26 @@
 // FinanceFlow - Modern Login Screen
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, KeyboardAvoidingView, Platform, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, KeyboardAvoidingView, Platform, TextInput, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { theme } from '../../styles/theme';
 import { globalStyles } from '../../styles/globalStyles';
 import CustomButton from '../../components/ui/CustomButton';
+import { useAuth } from '../../context/AuthContext';
 
 const { width, height } = Dimensions.get('window');
 
 const LoginScreen = ({ navigation }) => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const { login } = useAuth();
+  const [email, setEmail] = useState('test@financeflow.app');
+  const [password, setPassword] = useState('123456');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  // Input refs
+  const emailInputRef = useRef(null);
+  const passwordInputRef = useRef(null);
   
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -44,14 +49,28 @@ const LoginScreen = ({ navigation }) => {
   }, []);
 
   const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) {
+      Alert.alert('Hata', 'Lütfen e-posta ve şifre alanlarını doldurun');
+      return;
+    }
+
     setLoading(true);
-    // TODO: Implement real login logic
-    setTimeout(() => {
+    
+    try {
+      const result = await login(email.trim(), password, rememberMe);
+      
+      if (result.success) {
+        // Login successful - navigation will be handled by AppNavigator
+        console.log('Login successful:', result.user);
+      } else {
+        Alert.alert('Giriş Hatası', result.error);
+      }
+    } catch (error) {
+      Alert.alert('Hata', 'Giriş yapılırken bir hata oluştu');
+      console.error('Login error:', error);
+    } finally {
       setLoading(false);
-      // Login successful
-      // Navigate to main app after successful login
-      navigation.replace('Main');
-    }, 2000);
+    }
   };
 
   const handleForgotPassword = () => {
@@ -63,19 +82,25 @@ const LoginScreen = ({ navigation }) => {
   };
 
   return (
-    <View style={styles.container}>
-            <LinearGradient 
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -200}
+    >
+      <LinearGradient 
         colors={['#667eea', '#764ba2']} 
         style={styles.gradientBackground}
         start={{ x: 0, y: 0 }} 
         end={{ x: 1, y: 1 }}
       >
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-          style={styles.keyboardView}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-        >
-          <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea}>
+          <ScrollView 
+            contentContainerStyle={styles.scrollContainer}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            style={styles.scrollView}
+          >
             {/* Background Decorations */}
             <View style={styles.backgroundShapes}>
               <View style={[styles.shape, styles.shape1]} />
@@ -108,9 +133,9 @@ const LoginScreen = ({ navigation }) => {
               <Text style={styles.subtitleText}>Hesabınıza giriş yapın</Text>
             </Animated.View>
 
-            {/* Modern Form Section */}
+            {/* Form Section */}
             <View style={styles.formSection}>
-              {/* Modern Glass Inputs */}
+              {/* Email Input */}
               <View style={styles.inputContainer}>
                 <View style={styles.glassInputWrapper}>
                   <MaterialIcons 
@@ -120,6 +145,7 @@ const LoginScreen = ({ navigation }) => {
                     style={styles.inputIcon}
                   />
                   <TextInput
+                    ref={emailInputRef}
                     value={email}
                     onChangeText={setEmail}
                     placeholder="E-posta adresiniz"
@@ -128,10 +154,13 @@ const LoginScreen = ({ navigation }) => {
                     style={styles.directInput}
                     autoCapitalize="none"
                     autoCorrect={false}
+                    returnKeyType="next"
+                    onSubmitEditing={() => passwordInputRef.current?.focus()}
                   />
                 </View>
               </View>
 
+              {/* Password Input */}
               <View style={styles.inputContainer}>
                 <View style={styles.glassInputWrapper}>
                   <MaterialIcons 
@@ -141,6 +170,7 @@ const LoginScreen = ({ navigation }) => {
                     style={styles.inputIcon}
                   />
                   <TextInput
+                    ref={passwordInputRef}
                     value={password}
                     onChangeText={setPassword}
                     placeholder="Şifreniz"
@@ -149,6 +179,8 @@ const LoginScreen = ({ navigation }) => {
                     style={styles.directInput}
                     autoCapitalize="none"
                     autoCorrect={false}
+                    returnKeyType="done"
+                    onSubmitEditing={handleLogin}
                   />
                   <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
                     <MaterialIcons 
@@ -160,7 +192,7 @@ const LoginScreen = ({ navigation }) => {
                 </View>
               </View>
 
-                            {/* Remember Me & Forgot Password */}
+              {/* Remember Me & Forgot Password */}
               <View style={styles.optionsContainer}>
                 <TouchableOpacity 
                   style={styles.rememberMeContainer}
@@ -174,11 +206,12 @@ const LoginScreen = ({ navigation }) => {
                   <Text style={styles.rememberMeText}>Beni hatırla</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword')}>
+                <TouchableOpacity onPress={handleForgotPassword}>
                   <Text style={styles.forgotPasswordText}>Şifremi unuttum</Text>
                 </TouchableOpacity>
               </View>
 
+              {/* Login Button */}
               <TouchableOpacity
                 onPress={handleLogin}
                 disabled={loading}
@@ -198,23 +231,23 @@ const LoginScreen = ({ navigation }) => {
                   )}
                 </LinearGradient>
               </TouchableOpacity>
-            </View>
 
-            {/* Modern Footer */}
-            <View style={styles.modernFooter}>
-              <View style={styles.footerGlass}>
-                <View style={styles.registerContainer}>
-                  <Text style={styles.registerText}>Hesabınız yok mu? </Text>
-                  <TouchableOpacity onPress={handleRegister}>
-                    <Text style={styles.registerLink}>Kayıt olun</Text>
-                  </TouchableOpacity>
+              {/* Footer */}
+              <View style={styles.modernFooter}>
+                <View style={styles.footerGlass}>
+                  <View style={styles.registerContainer}>
+                    <Text style={styles.registerText}>Hesabınız yok mu? </Text>
+                    <TouchableOpacity onPress={handleRegister}>
+                      <Text style={styles.registerLink}>Kayıt olun</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             </View>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
+          </ScrollView>
+        </SafeAreaView>
       </LinearGradient>
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -227,12 +260,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
-  keyboardView: {
+  safeArea: {
     flex: 1,
   },
   
-  safeArea: {
+  scrollView: {
     flex: 1,
+  },
+  
+  scrollContainer: {
+    flexGrow: 1,
+    minHeight: height,
+    paddingBottom: 100,
   },
   
   backgroundShapes: {
@@ -316,10 +355,16 @@ const styles = StyleSheet.create({
   
   formSection: {
     flex: 1,
-    justifyContent: 'center',
     paddingHorizontal: theme.spacing.xl,
-    paddingTop: theme.spacing.md,
+    paddingTop: theme.spacing.xxl,
+    paddingBottom: theme.spacing.lg,
+    // Klavye açıldığında daha iyi görünüm için
     minHeight: 400,
+  },
+  
+  formContainer: {
+    flex: 1,
+    marginTop: theme.spacing.lg,
   },
   
   inputContainer: {

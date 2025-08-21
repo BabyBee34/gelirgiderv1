@@ -9,10 +9,12 @@ import { testUser } from '../../utils/testData';
 import { formatCurrency } from '../../utils/formatters';
 import { dataExport } from '../../utils/dataExport';
 import { notificationSystem } from '../../utils/notificationSystem';
+import { useAuth } from '../../context/AuthContext';
 
 const { width } = Dimensions.get('window');
 
 const ProfileScreen = ({ navigation }) => {
+  const { user, logout } = useAuth();
   const [notificationsEnabled, setNotificationsEnabled] = useState(testUser.user.preferences.notifications);
   const [darkModeEnabled, setDarkModeEnabled] = useState(testUser.user.preferences.darkMode);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
@@ -43,7 +45,7 @@ const ProfileScreen = ({ navigation }) => {
     return testUser.accounts.reduce((total, account) => total + account.balance, 0);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     Alert.alert(
       'Çıkış Yap',
       'Hesabınızdan çıkmak istediğinizden emin misiniz?',
@@ -55,12 +57,9 @@ const ProfileScreen = ({ navigation }) => {
         {
           text: 'Çıkış Yap',
           style: 'destructive',
-          onPress: () => {
-            // Navigate back to auth
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'Auth' }],
-            });
+          onPress: async () => {
+            await logout();
+            // Navigation will be handled by AppNavigator
           },
         },
       ]

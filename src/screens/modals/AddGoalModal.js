@@ -10,7 +10,9 @@ import {
   ScrollView, 
   Dimensions,
   Animated,
-  Alert
+  Alert,
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -179,25 +181,35 @@ const AddGoalModal = ({ visible, onClose, goal = null }) => {
   return (
     <>
       <Modal visible={visible} animationType="none" presentationStyle="pageSheet">
-        <SafeAreaView style={styles.container}>
-          <Animated.View style={[styles.modal, { transform: [{ translateY: slideAnim }] }]}>
-            {/* Header */}
-            <LinearGradient
-              colors={[selectedColor, selectedColor + '80']}
-              style={styles.header}
-            >
-              <TouchableOpacity onPress={handleClose}>
-                <MaterialIcons name="close" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-              <Text style={styles.headerTitle}>
-                {goal ? 'Hedefi Düzenle' : 'Yeni Hedef'}
-              </Text>
-              <TouchableOpacity onPress={handleSave}>
-                <Text style={styles.saveText}>Kaydet</Text>
-              </TouchableOpacity>
-            </LinearGradient>
+        <KeyboardAvoidingView 
+          style={styles.container}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -200}
+        >
+          <SafeAreaView style={styles.container}>
+            <Animated.View style={[styles.modal, { transform: [{ translateY: slideAnim }] }]}>
+              {/* Header */}
+              <LinearGradient
+                colors={[selectedColor, selectedColor + '80']}
+                style={styles.header}
+              >
+                <TouchableOpacity onPress={handleClose}>
+                  <MaterialIcons name="close" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+                <Text style={styles.headerTitle}>
+                  {goal ? 'Hedefi Düzenle' : 'Yeni Hedef'}
+                </Text>
+                <TouchableOpacity onPress={handleSave}>
+                  <Text style={styles.saveText}>Kaydet</Text>
+                </TouchableOpacity>
+              </LinearGradient>
 
-            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+              <ScrollView 
+                style={styles.content} 
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                bounces={false}
+              >
               {/* Preview */}
               <View style={styles.previewSection}>
                 <View style={[styles.previewIcon, { backgroundColor: `${selectedColor}15` }]}>
@@ -315,19 +327,20 @@ const AddGoalModal = ({ visible, onClose, goal = null }) => {
               </View>
 
               <View style={styles.bottomPadding} />
-            </ScrollView>
-          </Animated.View>
-        </SafeAreaView>
+              </ScrollView>
+            </Animated.View>
 
-        {showDatePicker && (
-          <DateTimePicker
-            value={targetDate}
-            mode="date"
-            display="default"
-            onChange={handleDateChange}
-            minimumDate={new Date()}
-          />
-        )}
+            {showDatePicker && (
+              <DateTimePicker
+                value={targetDate}
+                mode="date"
+                display="default"
+                onChange={handleDateChange}
+                minimumDate={new Date()}
+              />
+            )}
+          </SafeAreaView>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );

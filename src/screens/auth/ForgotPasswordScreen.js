@@ -1,25 +1,33 @@
 // FinanceFlow - Modern Forgot Password Screen
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, KeyboardAvoidingView, Platform, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, KeyboardAvoidingView, Platform, TextInput, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { theme } from '../../styles/theme';
 import { globalStyles } from '../../styles/globalStyles';
 import CustomButton from '../../components/ui/CustomButton';
+import { useAuth } from '../../context/AuthContext';
 
 const { width, height } = Dimensions.get('window');
 
 const ForgotPasswordScreen = ({ navigation }) => {
+  const { resetPassword } = useAuth();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   
+  // Input ref
+  const emailInputRef = useRef(null);
+  
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
+  const successAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // Entry animations
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -31,91 +39,175 @@ const ForgotPasswordScreen = ({ navigation }) => {
         duration: 600,
         useNativeDriver: true,
       }),
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
     ]).start();
   }, []);
 
+
+
   const handleResetPassword = async () => {
+    if (!email.trim()) {
+      Alert.alert('Hata', 'Lütfen e-posta adresinizi girin');
+      return;
+    }
+
+    if (!email.includes('@')) {
+      Alert.alert('Hata', 'Lütfen geçerli bir e-posta adresi girin');
+      return;
+    }
+
     setLoading(true);
-    // TODO: Implement password reset logic
-    setTimeout(() => {
+    
+    try {
+      const result = await resetPassword(email.trim());
+      
+      if (result.success) {
+        setEmailSent(true);
+        
+        // Success animation
+        Animated.timing(successAnim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }).start();
+        
+        Alert.alert('Başarılı', result.message);
+      } else {
+        Alert.alert('Hata', result.error);
+      }
+    } catch (error) {
+      Alert.alert('Hata', 'Şifre sıfırlama işlemi başarısız oldu');
+      console.error('Password reset error:', error);
+    } finally {
       setLoading(false);
-      setEmailSent(true);
-      // Password reset email sent
-    }, 2000);
+    }
   };
 
   const handleBackToLogin = () => {
     navigation.navigate('Login');
   };
 
+  const handleResendEmail = () => {
+    setEmailSent(false);
+    setEmail('');
+    emailInputRef.current?.focus();
+  };
+
   if (emailSent) {
     return (
-      <SafeAreaView style={[globalStyles.safeArea, styles.container]}>
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <MaterialIcons 
-              name="arrow-back" 
-              size={24} 
-              color={theme.colors.textPrimary} 
-            />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.content}>
-          <View style={styles.illustration}>
-            <MaterialIcons 
-              name="mark-email-read" 
-              size={80} 
-              color={theme.colors.success} 
-            />
-          </View>
-
-          <Text style={styles.successTitle}>E-posta Gönderildi!</Text>
-          <Text style={styles.successText}>
-            Şifre sıfırlama bağlantısını {email} adresine gönderdik.
-            E-postanızı kontrol edin ve talimatları takip edin.
-          </Text>
-
-          <CustomButton
-            title="Giriş Ekranına Dön"
-            onPress={handleBackToLogin}
-            variant="primary"
-            size="large"
-            style={styles.button}
-          />
-
-          <TouchableOpacity 
-            style={styles.resendButton}
-            onPress={() => setEmailSent(false)}
-          >
-            <Text style={styles.resendText}>E-postayı tekrar gönder</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-            <LinearGradient 
-        colors={['#4facfe', '#00f2fe']} 
-        style={styles.gradientBackground}
-        start={{ x: 0, y: 0 }} 
-        end={{ x: 1, y: 1 }}
-      >
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-          style={styles.keyboardView}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      <View style={styles.container}>
+        <LinearGradient 
+          colors={['#667eea', '#764ba2']} 
+          style={styles.gradientBackground}
+          start={{ x: 0, y: 0 }} 
+          end={{ x: 1, y: 1 }}
         >
           <SafeAreaView style={styles.safeArea}>
             {/* Background Shapes */}
             <View style={styles.backgroundShapes}>
               <View style={[styles.shape, styles.shape1]} />
               <View style={[styles.shape, styles.shape2]} />
+              <View style={[styles.shape, styles.shape3]} />
+            </View>
+
+            {/* Success Content */}
+            <Animated.View 
+              style={[
+                styles.successContainer,
+                {
+                  opacity: fadeAnim,
+                  transform: [{ translateY: slideAnim }]
+                }
+              ]}
+            >
+              <Animated.View 
+                style={[
+                  styles.successIcon,
+                  {
+                    transform: [{ scale: successAnim }]
+                  }
+                ]}
+              >
+                <MaterialIcons 
+                  name="check-circle" 
+                  size={80} 
+                  color="#48BB78" 
+                />
+              </Animated.View>
+              
+              <Text style={styles.successTitle}>E-posta Gönderildi!</Text>
+              <Text style={styles.successMessage}>
+                Şifre sıfırlama bağlantısı {email} adresine gönderildi. 
+                Lütfen e-postanızı kontrol edin ve bağlantıya tıklayın.
+              </Text>
+              
+              <View style={styles.successActions}>
+                <TouchableOpacity
+                  style={styles.resendButton}
+                  onPress={handleResendEmail}
+                  activeOpacity={0.8}
+                >
+                  <LinearGradient
+                    colors={['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.1)']}
+                    style={styles.buttonGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                  >
+                    <Text style={styles.buttonText}>Tekrar Gönder</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={handleBackToLogin}
+                  activeOpacity={0.8}
+                >
+                  <LinearGradient
+                    colors={['rgba(255,255,255,0.25)', 'rgba(255,255,255,0.1)']}
+                    style={styles.buttonGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                  >
+                    <Text style={styles.buttonText}>Giriş'e Dön</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+          </SafeAreaView>
+        </LinearGradient>
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -200}
+    >
+      <LinearGradient 
+        colors={['#667eea', '#764ba2']} 
+        style={styles.gradientBackground}
+        start={{ x: 0, y: 0 }} 
+        end={{ x: 1, y: 1 }}
+      >
+        <SafeAreaView style={styles.safeArea}>
+          <ScrollView 
+            contentContainerStyle={styles.scrollContainer}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            style={styles.scrollView}
+          >
+            {/* Background Shapes */}
+            <View style={styles.backgroundShapes}>
+              <View style={[styles.shape, styles.shape1]} />
+              <View style={[styles.shape, styles.shape2]} />
+              <View style={[styles.shape, styles.shape3]} />
             </View>
 
             {/* Header */}
@@ -147,23 +239,20 @@ const ForgotPasswordScreen = ({ navigation }) => {
                     color="#FFFFFF" 
                   />
                 </View>
-                <Text style={styles.logoText}>Şifre Sıfırla</Text>
+                <Text style={styles.logoText}>Şifremi Unuttum</Text>
               </View>
               
-              <Text style={styles.welcomeText}>Şifrenizi mi unuttunuz?</Text>
-              <Text style={styles.subtitleText}>E-posta adresinizi girin, size sıfırlama bağlantısı gönderelim</Text>
+              <Text style={styles.welcomeText}>Endişelenmeyin!</Text>
+              <Text style={styles.subtitleText}>Şifrenizi sıfırlayalım</Text>
             </Animated.View>
 
             {/* Form Section */}
-            <Animated.View 
-              style={[
-                styles.formSection,
-                {
-                  opacity: fadeAnim,
-                  transform: [{ translateY: slideAnim }]
-                }
-              ]}
-            >
+            <View style={styles.formSection}>
+              <Text style={styles.instructionText}>
+                E-posta adresinizi girin, size şifre sıfırlama bağlantısı gönderelim.
+              </Text>
+
+              {/* Email Input */}
               <View style={styles.inputContainer}>
                 <View style={styles.glassInputWrapper}>
                   <MaterialIcons 
@@ -173,6 +262,7 @@ const ForgotPasswordScreen = ({ navigation }) => {
                     style={styles.inputIcon}
                   />
                   <TextInput
+                    ref={emailInputRef}
                     value={email}
                     onChangeText={setEmail}
                     placeholder="E-posta adresiniz"
@@ -181,14 +271,17 @@ const ForgotPasswordScreen = ({ navigation }) => {
                     style={styles.directInput}
                     autoCapitalize="none"
                     autoCorrect={false}
+                    returnKeyType="done"
+                    onSubmitEditing={handleResetPassword}
                   />
                 </View>
               </View>
 
+              {/* Reset Button */}
               <TouchableOpacity
                 onPress={handleResetPassword}
-                disabled={loading || !email.trim()}
-                style={[styles.resetButtonContainer, (!email.trim() || loading) && styles.buttonDisabled]}
+                disabled={loading}
+                style={styles.resetButtonContainer}
                 activeOpacity={0.8}
               >
                 <LinearGradient
@@ -197,28 +290,28 @@ const ForgotPasswordScreen = ({ navigation }) => {
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                 >
-                  <Text style={styles.resetButtonText}>
-                    {loading ? 'Gönderiliyor...' : 'Sıfırlama Bağlantısı Gönder'}
-                  </Text>
+                  {loading ? (
+                    <Text style={styles.resetButtonText}>Gönderiliyor...</Text>
+                  ) : (
+                    <Text style={styles.resetButtonText}>Şifre Sıfırlama Bağlantısı Gönder</Text>
+                  )}
                 </LinearGradient>
               </TouchableOpacity>
-            </Animated.View>
 
-            {/* Footer */}
-            <View style={styles.modernFooter}>
-              <View style={styles.footerGlass}>
-                <View style={styles.loginContainer}>
-                  <Text style={styles.loginText}>Şifrenizi hatırladınız mı? </Text>
+              {/* Footer */}
+              <View style={styles.modernFooter}>
+                <View style={styles.footerGlass}>
+                  <Text style={styles.footerText}>Şifrenizi hatırladınız mı? </Text>
                   <TouchableOpacity onPress={handleBackToLogin}>
-                    <Text style={styles.loginLink}>Giriş yapın</Text>
+                    <Text style={styles.footerLink}>Giriş yapın</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             </View>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
+          </ScrollView>
+        </SafeAreaView>
       </LinearGradient>
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -231,13 +324,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
-  keyboardView: {
-    flex: 1,
-    justifyContent: 'space-between',
-  },
-  
   safeArea: {
     flex: 1,
+  },
+  
+  scrollView: {
+    flex: 1,
+  },
+  
+  scrollContainer: {
+    flexGrow: 1,
+    minHeight: height,
+    paddingBottom: 100,
   },
   
   backgroundShapes: {
@@ -266,6 +364,14 @@ const styles = StyleSheet.create({
     bottom: 100,
     left: -75,
     borderRadius: 75,
+  },
+  
+  shape3: {
+    width: 100,
+    height: 100,
+    top: 200,
+    left: width * 0.7,
+    borderRadius: 50,
   },
   
   header: {
@@ -333,6 +439,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: theme.spacing.xl,
     paddingBottom: height * 0.1,
+  },
+  
+  scrollContent: {
+    flexGrow: 1,
+  },
+
+  instructionText: {
+    ...theme.typography.bodyMedium,
+    color: 'rgba(255,255,255,0.9)',
+    textAlign: 'center',
+    marginBottom: theme.spacing.xxl,
+    paddingHorizontal: theme.spacing.md,
+    textShadowColor: 'rgba(0,0,0,0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   
   inputContainer: {
@@ -412,14 +533,25 @@ const styles = StyleSheet.create({
     ...theme.shadows.small,
   },
   
+  successContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xxl,
+  },
+
+  successIcon: {
+    marginBottom: theme.spacing.md,
+  },
+
   successTitle: {
     ...theme.typography.h2,
     color: theme.colors.textPrimary,
     textAlign: 'center',
     marginBottom: theme.spacing.md,
   },
-  
-  successText: {
+
+  successMessage: {
     ...theme.typography.bodyMedium,
     color: theme.colors.textSecondary,
     textAlign: 'center',
@@ -427,20 +559,30 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.xxl,
     paddingHorizontal: theme.spacing.md,
   },
-  
-  button: {
-    marginBottom: theme.spacing.lg,
+
+  successActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginTop: theme.spacing.lg,
   },
-  
+
   resendButton: {
-    alignItems: 'center',
-    paddingVertical: theme.spacing.md,
+    flex: 1,
+    marginHorizontal: theme.spacing.sm,
   },
-  
-  resendText: {
-    ...theme.typography.bodyMedium,
-    color: theme.colors.primary,
-    fontWeight: '500',
+
+  buttonGradient: {
+    paddingVertical: theme.spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: theme.borderRadius.md,
+  },
+
+  buttonText: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   
   footer: {
@@ -448,12 +590,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   
-  loginContainer: {
-    flexDirection: 'row',
+  footerGlass: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: theme.borderRadius.xl,
+    paddingVertical: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.xl,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
   },
   
-  loginText: {
+  footerText: {
     ...theme.typography.bodyMedium,
     color: 'rgba(255,255,255,0.9)',
     textShadowColor: 'rgba(0,0,0,0.3)',
@@ -461,7 +608,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 2,
   },
   
-  loginLink: {
+  footerLink: {
     ...theme.typography.bodyMedium,
     color: '#FFFFFF',
     fontWeight: '700',

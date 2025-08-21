@@ -7,6 +7,9 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { theme } from '../../styles/theme';
 import { testUser, testFunctions } from '../../utils/testData';
 import { formatCurrency, formatCurrencyInput, parseCurrency } from '../../utils/formatters';
+import { transactionStorage } from '../../utils/storage';
+import { formValidation, VALIDATION_SCHEMAS } from '../../utils/validation';
+import { LoadingScreen } from '../../components/ui/LoadingScreen';
 
 const { width, height } = Dimensions.get('window');
 
@@ -82,11 +85,7 @@ const AddTransactionModal = ({ visible, onClose, transactionType = 'expense', on
   };
 
   const getQuickAmounts = () => {
-    if (transactionType === 'income') {
-      return [100, 500, 1000, 2500, 5000];
-    } else {
-      return [25, 50, 100, 250, 500];
-    }
+    return transactionType === 'income' ? [100, 500, 1000, 5000] : [10, 25, 50, 100];
   };
 
   const handleQuickAmount = (quickAmount) => {
@@ -94,87 +93,200 @@ const AddTransactionModal = ({ visible, onClose, transactionType = 'expense', on
   };
 
   const handleSave = async () => {
-    if (!amount || !selectedCategory || !description.trim()) {
-      Alert.alert('Eksik Bilgi', 'Lütfen tüm alanları doldurun.');
+    if (!amount || !selectedCategory || !selectedAccount) {
+      Alert.alert('Hata', 'Lütfen tüm alanları doldurun');
       return;
     }
 
-    const numericAmount = parseCurrency(amount);
-    if (numericAmount <= 0) {
-      Alert.alert('Geçersiz Tutar', 'Lütfen geçerli bir tutar girin.');
+    const validation = formValidation.validate(VALIDATION_SCHEMAS.TRANSACTION, {
+      amount: parseCurrency(amount),
+      description,
+      categoryId: selectedCategory.id,
+      accountId: selectedAccount.id,
+      date: date.toISOString()
+    });
+
+    if (!validation.isValid) {
+      Alert.alert('Hata', validation.errors.join('\n'));
       return;
     }
 
     setLoading(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const transaction = {
+        id: `trx-${Date.now()}`,
+        type: transactionType,
+        amount: parseCurrency(amount),
+        description: description.trim() || selectedCategory.name,
+        categoryId: selectedCategory.id,
+        accountId: selectedAccount.id,
+        date: date.toISOString(),
+        createdAt: new Date().toISOString()
+      };
 
-      const newTransaction = testFunctions.addTestTransaction(
-        transactionType,
-        numericAmount,
-        selectedCategory.id,
-        description.trim()
-      );
-
-      // Update account balance
-      const balanceChange = transactionType === 'income' ? numericAmount : -numericAmount;
-      testFunctions.updateAccountBalance(selectedAccount.id, balanceChange);
-
-      if (onTransactionAdded) {
-        onTransactionAdded(newTransaction);
-      }
-
+      await transactionStorage.addTransaction(transaction);
+      
       Alert.alert(
-        'Başarılı',
-        `${transactionType === 'income' ? 'Gelir' : 'Gider'} başarıyla eklendi.`,
-        [{ text: 'Tamam', onPress: handleClose }]
+        'Başarılı', 
+        `${transactionType === 'income' ? 'Gelir' : 'Gider'} başarıyla eklendi`,
+        [{ text: 'Tamam', onPress: () => {
+          onTransactionAdded?.(transaction);
+          handleClose();
+        }}]
       );
-
     } catch (error) {
-      Alert.alert('Hata', 'İşlem eklenirken bir hata oluştu.');
+      Alert.alert('Hata', 'İşlem eklenirken bir hata oluştu');
+      console.error('Transaction save error:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const renderCategorySelector = () => (
-    <Modal visible={showCategories} animationType="slide" presentationStyle="pageSheet">
-      <SafeAreaView style={styles.modalContainer}>
-        <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>Kategori Seçin</Text>
-          <TouchableOpacity onPress={() => setShowCategories(false)}>
-            <MaterialIcons name="close" size={24} color={theme.colors.textPrimary} />
-          </TouchableOpacity>
-        </View>
-        
-        <ScrollView style={styles.categoriesGrid}>
-          {getCategories().map((category) => (
-            <TouchableOpacity
-              key={category.id}
-              style={[
-                styles.categoryItem,
-                selectedCategory?.id === category.id && styles.categoryItemSelected
-              ]}
-              onPress={() => {
-                setSelectedCategory(category);
-                setShowCategories(false);
-              }}
-            >
-              <View style={[styles.categoryIcon, { backgroundColor: `${category.color}15` }]}>
-                <MaterialIcons name={category.icon} size={24} color={category.color} />
-              </View>
-              <Text style={styles.categoryName}>{category.name}</Text>
-              {selectedCategory?.id === category.id && (
-                <MaterialIcons name="check-circle" size={20} color={theme.colors.primary} />
-              )}
+  const renderCategorySelector = () => {
+    const [searchQuery, setSearchQuery] = useState('');
+    const categories = getCategories();
+    
+    // Arama filtreleme
+    const filteredCategories = categories.filter(category => {
+      const query = searchQuery.toLowerCase();
+      return (
+        category.name.toLowerCase().includes(query) ||
+        (category.tags && category.tags.some(tag => tag.toLowerCase().includes(query))) ||
+        (category.isPlatform && category.platformName && category.platformName.toLowerCase().includes(query))
+      );
+    });
+
+    const platformCategories = filteredCategories.filter(cat => cat.isPlatform);
+    const regularCategories = filteredCategories.filter(cat => !cat.isPlatform);
+
+    return (
+      <Modal visible={showCategories} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Kategori Seçin</Text>
+            <TouchableOpacity onPress={() => setShowCategories(false)}>
+              <MaterialIcons name="close" size={24} color={theme.colors.textPrimary} />
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
-  );
+          </View>
+          
+          {/* Arama Çubuğu */}
+          <View style={styles.searchContainer}>
+            <View style={styles.searchInputContainer}>
+              <MaterialIcons name="search" size={20} color={theme.colors.textSecondary} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Kategori ara..."
+                placeholderTextColor={theme.colors.textSecondary}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <MaterialIcons name="clear" size={20} color={theme.colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+          
+          <ScrollView style={styles.categoriesGrid}>
+            {/* Genel Kategoriler */}
+            {regularCategories.length > 0 && (
+              <>
+                <Text style={styles.categoryGroupTitle}>Genel Kategoriler</Text>
+                {regularCategories.map((category) => (
+                  <TouchableOpacity
+                    key={category.id}
+                    style={[
+                      styles.categoryItem,
+                      selectedCategory?.id === category.id && styles.categoryItemSelected
+                    ]}
+                    onPress={() => {
+                      setSelectedCategory(category);
+                      // Platform seçildiğinde aylık ücreti otomatik doldur
+                      if (category.isPlatform && category.monthlyFee) {
+                        setAmount(formatCurrencyInput(category.monthlyFee.toString()));
+                      }
+                      setShowCategories(false);
+                    }}
+                  >
+                    <View style={[styles.categoryIcon, { backgroundColor: `${category.color}15` }]}>
+                      <MaterialIcons name={category.icon} size={24} color={category.color} />
+                    </View>
+                    <View style={styles.categoryInfo}>
+                      <Text style={styles.categoryName}>{category.name}</Text>
+                      {category.tags && (
+                        <Text style={styles.categoryTags}>
+                          {category.tags.slice(0, 3).join(' • ')}
+                        </Text>
+                      )}
+                    </View>
+                    {selectedCategory?.id === category.id && (
+                      <MaterialIcons name="check-circle" size={20} color={theme.colors.primary} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
+
+            {/* Sosyal Medya & Abonelikler */}
+            {transactionType === 'expense' && platformCategories.length > 0 && (
+              <>
+                <Text style={styles.categoryGroupTitle}>Sosyal Medya & Abonelikler</Text>
+                {platformCategories.map((category) => (
+                  <TouchableOpacity
+                    key={category.id}
+                    style={[
+                      styles.categoryItem,
+                      styles.platformCategoryItem,
+                      selectedCategory?.id === category.id && styles.categoryItemSelected
+                    ]}
+                    onPress={() => {
+                      setSelectedCategory(category);
+                      // Platform seçildiğinde aylık ücreti otomatik doldur
+                      if (category.isPlatform && category.monthlyFee) {
+                        setAmount(formatCurrencyInput(category.monthlyFee.toString()));
+                      }
+                      setShowCategories(false);
+                    }}
+                  >
+                    <View style={[styles.categoryIcon, { backgroundColor: `${category.color}15` }]}>
+                      <MaterialIcons name={category.icon} size={24} color={category.color} />
+                    </View>
+                    <View style={styles.categoryInfo}>
+                      <Text style={styles.categoryName}>{category.name}</Text>
+                      <Text style={styles.categoryTags}>
+                        {category.platformName || category.name} • Abonelik
+                      </Text>
+                      {category.monthlyFee && (
+                        <Text style={styles.categoryFee}>
+                          Aylık: {formatCurrency(category.monthlyFee)}
+                        </Text>
+                      )}
+                    </View>
+                    {selectedCategory?.id === category.id && (
+                      <MaterialIcons name="check-circle" size={20} color={theme.colors.primary} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
+
+            {/* Arama sonucu yoksa */}
+            {filteredCategories.length === 0 && searchQuery.length > 0 && (
+              <View style={styles.noResultsContainer}>
+                <MaterialIcons name="search-off" size={48} color={theme.colors.textSecondary} />
+                <Text style={styles.noResultsText}>"{searchQuery}" için sonuç bulunamadı</Text>
+                <Text style={styles.noResultsSubtext}>Farklı anahtar kelimeler deneyin</Text>
+              </View>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    );
+  };
 
   const renderAccountSelector = () => (
     <Modal visible={showAccounts} animationType="slide" presentationStyle="pageSheet">
@@ -255,9 +367,14 @@ const AddTransactionModal = ({ visible, onClose, transactionType = 'expense', on
 
           <KeyboardAvoidingView 
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -200}
             style={styles.content}
           >
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView 
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              bounces={false}
+            >
               {/* Amount Input */}
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Tutar</Text>
@@ -571,24 +688,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.lg,
     borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
+    borderBottomColor: theme.colors.border,
   },
 
   modalTitle: {
-    fontSize: 18,
+    fontSize: 20,
     color: theme.colors.textPrimary,
     fontWeight: '700',
   },
 
   categoriesGrid: {
-    padding: theme.spacing.lg,
+    flex: 1,
+    paddingHorizontal: theme.spacing.lg,
   },
 
   categoryItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: theme.colors.cards,
-    padding: theme.spacing.lg,
+    padding: theme.spacing.md,
     marginBottom: theme.spacing.sm,
     borderRadius: theme.borderRadius.md,
     elevation: 1,
@@ -601,22 +719,65 @@ const styles = StyleSheet.create({
   categoryItemSelected: {
     borderWidth: 2,
     borderColor: theme.colors.primary,
+    backgroundColor: `${theme.colors.primary}10`,
   },
 
   categoryIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: theme.spacing.md,
   },
 
-  categoryName: {
+  categoryInfo: {
     flex: 1,
+  },
+
+  categoryName: {
     fontSize: 16,
     color: theme.colors.textPrimary,
     fontWeight: '600',
+  },
+
+  categoryTags: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    marginTop: 2,
+  },
+
+  categoryFee: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+
+  categoryGroupTitle: {
+    fontSize: 18,
+    color: theme.colors.textPrimary,
+    fontWeight: '700',
+    marginBottom: theme.spacing.md,
+    marginTop: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.lg,
+  },
+
+  platformCategoryItem: {
+    backgroundColor: 'rgba(108, 99, 255, 0.05)',
+    borderLeftWidth: 3,
+    borderLeftColor: theme.colors.primary,
+  },
+
+  platformInfo: {
+    flex: 1,
+  },
+
+  platformFee: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    fontWeight: '500',
+    marginTop: 2,
   },
 
   accountsList: {
@@ -666,6 +827,54 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: theme.colors.textSecondary,
     fontWeight: '500',
+  },
+
+  // Search styles
+  searchContainer: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+  },
+
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.cards,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    elevation: 2,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: theme.colors.textPrimary,
+    paddingVertical: 0,
+    paddingHorizontal: theme.spacing.md,
+  },
+
+  noResultsContainer: {
+    alignItems: 'center',
+    paddingVertical: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.md,
+  },
+
+  noResultsText: {
+    fontSize: 18,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.md,
+    textAlign: 'center',
+  },
+
+  noResultsSubtext: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.sm,
+    textAlign: 'center',
   },
 });
 

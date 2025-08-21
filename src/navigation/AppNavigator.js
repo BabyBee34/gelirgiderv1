@@ -4,8 +4,9 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
+import { View, ActivityIndicator } from 'react-native';
 
-// Import screens (will be created later)
+// Import screens
 import OnboardingScreen from '../screens/OnboardingScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
@@ -18,6 +19,8 @@ import ProfileScreen from '../screens/main/ProfileScreen';
 import GoldCurrencyScreen from '../screens/main/GoldCurrencyScreen';
 import BudgetScreen from '../screens/main/BudgetScreen';
 
+// Import context
+import { useAuth } from '../context/AuthContext';
 import { theme } from '../styles/theme';
 
 const Stack = createStackNavigator();
@@ -115,45 +118,62 @@ const MainTabs = () => {
   );
 };
 
+// Loading Screen Component
+const LoadingScreen = () => (
+  <View style={{ 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    backgroundColor: theme.colors.background 
+  }}>
+    <ActivityIndicator size="large" color={theme.colors.primary} />
+  </View>
+);
+
 // Main App Navigator
 const AppNavigator = () => {
-  // TODO: Add authentication state management with AsyncStorage
-  const isAuthenticated = false; // This will be managed by context/state
+  const { isAuthenticated, isLoading, hasCompletedOnboarding } = useAuth();
+
+  // Show loading screen while checking auth state
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
 
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName="Onboarding"
         screenOptions={{
           headerShown: false,
           cardStyle: { backgroundColor: theme.colors.background },
           animationEnabled: true,
         }}
       >
-        {/* Onboarding Flow */}
-        <Stack.Screen 
-          name="Onboarding" 
-          component={OnboardingScreen}
-          options={{
-            gestureEnabled: false, // Onboarding'den geri gidilmesini engelle
-          }}
-        />
-        
-        {/* Auth Flow */}
-        <Stack.Screen name="Auth" component={AuthStack} />
-        
-        {/* Main App Flow */}
-        <Stack.Screen 
-          name="Main" 
-          component={MainTabs}
-          options={{
-            gestureEnabled: false, // Main app'ten geri gidilmesini engelle
-          }}
-        />
-        
-        {/* Additional Screens */}
-        <Stack.Screen name="GoldCurrency" component={GoldCurrencyScreen} />
-        <Stack.Screen name="Budget" component={BudgetScreen} />
+        {!hasCompletedOnboarding ? (
+          // Onboarding Flow
+          <Stack.Screen 
+            name="Onboarding" 
+            component={OnboardingScreen}
+            options={{
+              gestureEnabled: false,
+            }}
+          />
+        ) : !isAuthenticated ? (
+          // Auth Flow
+          <Stack.Screen name="Auth" component={AuthStack} />
+        ) : (
+          // Main App Flow
+          <>
+            <Stack.Screen 
+              name="Main" 
+              component={MainTabs}
+              options={{
+                gestureEnabled: false,
+              }}
+            />
+            <Stack.Screen name="GoldCurrency" component={GoldCurrencyScreen} />
+            <Stack.Screen name="Budget" component={BudgetScreen} />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

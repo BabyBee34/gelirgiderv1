@@ -8,10 +8,12 @@ import {
   TouchableOpacity, 
   TextInput, 
   ScrollView, 
-  Dimensions,
-  Animated,
-  Switch,
-  Alert
+  Dimensions, 
+  Animated, 
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Switch
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,42 +21,77 @@ import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { theme } from '../../styles/theme';
 import { testUser } from '../../utils/testData';
-import { formatCurrency, handleCurrencyInput, currencyToNumber } from '../../utils/formatters';
+import { formatCurrency, currencyToNumber } from '../../utils/formatters';
 import { categoryIcons, categoryColors, getIconsByCategory } from '../../utils/iconColorData';
+import { transactionStorage } from '../../utils/storage';
+import { formValidation, VALIDATION_SCHEMAS } from '../../utils/validation';
+
 
 const { width, height } = Dimensions.get('window');
 
-const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => {
+const DetailedAddTransactionModal = ({ 
+  visible, 
+  onClose, 
+  type = 'expense', 
+  onTransactionAdded 
+}) => {
+  // State variables
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedCategories, setSelectedCategories] = useState([]);
-  const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState(testUser.accounts[0]);
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [date, setDate] = useState(new Date());
+  const [time, setTime] = useState(new Date());
   const [notes, setNotes] = useState('');
-  const [iconSelectorVisible, setIconSelectorVisible] = useState(false);
-  const [colorSelectorVisible, setColorSelectorVisible] = useState(false);
-  const [selectedIcon, setSelectedIcon] = useState('category');
-  const [selectedColor, setSelectedColor] = useState('#6C63FF');
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [showDateModal, setShowDateModal] = useState(false);
+  const [showTimeModal, setShowTimeModal] = useState(false);
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [showIconSelector, setShowIconSelector] = useState(false);
+  const [showColorSelector, setShowColorSelector] = useState(false);
+  const [customIcon, setCustomIcon] = useState('category');
+  const [customColor, setCustomColor] = useState('#6C63FF');
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [recurringType, setRecurringType] = useState('none');
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringFrequency, setRecurringFrequency] = useState('monthly');
-  const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [customCategoryName, setCustomCategoryName] = useState('');
   const [customCategoryIcon, setCustomCategoryIcon] = useState('category');
   const [customCategoryColor, setCustomCategoryColor] = useState('#6C63FF');
   const [showCustomCategoryForm, setShowCustomCategoryForm] = useState(false);
   const [showAllIcons, setShowAllIcons] = useState(false);
   const [showAllColors, setShowAllColors] = useState(false);
+  const [categorySearchText, setCategorySearchText] = useState('');
 
+
+  
+  // Input refs
+  const amountInputRef = useRef(null);
+  const descriptionInputRef = useRef(null);
+  const notesInputRef = useRef(null);
+  
+  // ScrollView ref
+  const scrollViewRef = useRef(null);
+  
+
+  
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
   const slideAnim = useRef(new Animated.Value(height)).current;
-  const scaleAnim = useRef(new Animated.Value(0)).current;
 
-  const categories = type === 'income' ? testUser.incomeCategories : testUser.expenseCategories;
+  const categories = type === 'income' ? testUser.categories.income : testUser.categories.expense;
   const platformCategories = categories.filter(cat => cat.isPlatform);
   const regularCategories = categories.filter(cat => !cat.isPlatform);
+  
+  // Arama filtresi ile kategorileri filtrele
+  const filteredCategories = categories.filter(cat => 
+    cat.name.toLowerCase().includes(categorySearchText.toLowerCase()) ||
+    (cat.tags && cat.tags.some(tag => tag.toLowerCase().includes(categorySearchText.toLowerCase())))
+  );
+  
   const quickAmounts = type === 'income' ? [1000, 2500, 5000, 10000] : [50, 100, 250, 500];
 
   const recurringOptions = [
@@ -77,34 +114,47 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
 
   useEffect(() => {
     if (visible) {
+      // Modal açıldığında animasyon
       Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.spring(scaleAnim, {
+        Animated.timing(fadeAnim, {
           toValue: 1,
-          tension: 50,
-          friction: 8,
-          useNativeDriver: true,
-        })
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: height,
           duration: 300,
           useNativeDriver: true,
         }),
         Animated.timing(scaleAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      // Modal kapandığında animasyon
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
           toValue: 0,
           duration: 200,
           useNativeDriver: true,
-        })
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 0.9,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: height,
+          duration: 200,
+          useNativeDriver: true,
+        }),
       ]).start();
     }
   }, [visible]);
+
+
 
   const handleSave = () => {
     if (!amount || !selectedCategory) {
@@ -119,7 +169,32 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
       description: description || selectedCategory.name,
       category: selectedCategory,
       account: selectedAccount,
-      date: selectedDate.toISOString(),
+      date: date.toISOString(),
+      notes,
+      isRecurring,
+      recurringFrequency: isRecurring ? recurringFrequency : null,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Transaction added successfully
+    Alert.alert('Başarılı', `${type === 'income' ? 'Gelir' : 'Gider'} başarıyla eklendi.`);
+    handleClose();
+  };
+
+  const handleSaveTransaction = () => {
+    if (!amount || !selectedCategory) {
+      Alert.alert('Hata', 'Lütfen miktar ve kategori seçin.');
+      return;
+    }
+
+    const transaction = {
+      id: Date.now().toString(),
+      type,
+      amount: parseFloat(amount.replace(/\./g, '').replace(',', '.')),
+      description: description || selectedCategory.name,
+      category: selectedCategory,
+      account: selectedAccount,
+      date: date.toISOString(),
       notes,
       isRecurring,
       recurringFrequency: isRecurring ? recurringFrequency : null,
@@ -135,7 +210,8 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
     setAmount('');
     setDescription('');
     setSelectedCategory(null);
-    setSelectedDate(new Date());
+    setDate(new Date());
+    setTime(new Date());
     setNotes('');
     setIsRecurring(false);
     setRecurringFrequency('monthly');
@@ -143,9 +219,9 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
   };
 
   const handleDateChange = (event, date) => {
-    setShowDatePicker(false);
+    setShowDateModal(false);
     if (date) {
-      setSelectedDate(date);
+      setDate(date);
     }
   };
 
@@ -305,16 +381,16 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
 
   const renderIconSelector = () => (
     <Modal
-      visible={iconSelectorVisible}
+      visible={showIconSelector}
       transparent={true}
       animationType="slide"
-      onRequestClose={() => setIconSelectorVisible(false)}
+      onRequestClose={() => setShowIconSelector(false)}
     >
       <View style={styles.iconSelectorOverlay}>
         <View style={styles.iconSelectorModal}>
           <View style={styles.iconSelectorHeader}>
             <Text style={styles.iconSelectorTitle}>İkon Seçin</Text>
-            <TouchableOpacity onPress={() => setIconSelectorVisible(false)}>
+            <TouchableOpacity onPress={() => setShowIconSelector(false)}>
               <MaterialIcons name="close" size={24} color={theme.colors.textPrimary} />
             </TouchableOpacity>
           </View>
@@ -326,15 +402,15 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
                   key={index}
                   style={[
                     styles.iconOption,
-                    selectedIcon === iconName && styles.iconOptionSelected
+                    customIcon === iconName && styles.iconOptionSelected
                   ]}
                   onPress={() => {
-                    setSelectedIcon(iconName);
+                    setCustomIcon(iconName);
                     setCustomCategoryIcon(iconName);
                   }}
                 >
                   <MaterialIcons name={iconName} size={24} color={
-                    selectedIcon === iconName ? theme.colors.primary : theme.colors.textSecondary
+                    customIcon === iconName ? theme.colors.primary : theme.colors.textSecondary
                   } />
                 </TouchableOpacity>
               ))}
@@ -363,7 +439,7 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
           
           <TouchableOpacity
             style={styles.iconSelectorConfirm}
-            onPress={() => setIconSelectorVisible(false)}
+            onPress={() => setShowIconSelector(false)}
           >
             <Text style={styles.iconSelectorConfirmText}>Tamam</Text>
           </TouchableOpacity>
@@ -374,16 +450,16 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
 
   const renderColorSelector = () => (
     <Modal
-      visible={colorSelectorVisible}
+      visible={showColorSelector}
       transparent={true}
       animationType="slide"
-      onRequestClose={() => setColorSelectorVisible(false)}
+      onRequestClose={() => setShowColorSelector(false)}
     >
       <View style={styles.colorSelectorOverlay}>
         <View style={styles.colorSelectorModal}>
           <View style={styles.colorSelectorHeader}>
             <Text style={styles.colorSelectorTitle}>Renk Seçin</Text>
-            <TouchableOpacity onPress={() => setColorSelectorVisible(false)}>
+            <TouchableOpacity onPress={() => setShowColorSelector(false)}>
               <MaterialIcons name="close" size={24} color={theme.colors.textPrimary} />
             </TouchableOpacity>
           </View>
@@ -396,14 +472,14 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
                   style={[
                     styles.colorOption,
                     { backgroundColor: color },
-                    selectedColor === color && styles.colorOptionSelected
+                    customColor === color && styles.colorOptionSelected
                   ]}
                   onPress={() => {
-                    setSelectedColor(color);
+                    setCustomColor(color);
                     setCustomCategoryColor(color);
                   }}
                 >
-                  {selectedColor === color && (
+                  {customColor === color && (
                     <MaterialIcons name="check" size={20} color="#ffffff" />
                   )}
                 </TouchableOpacity>
@@ -433,7 +509,7 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
           
           <TouchableOpacity
             style={styles.colorSelectorConfirm}
-            onPress={() => setColorSelectorVisible(false)}
+            onPress={() => setShowColorSelector(false)}
           >
             <Text style={styles.colorSelectorConfirmText}>Tamam</Text>
           </TouchableOpacity>
@@ -467,6 +543,23 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
         <ScrollView style={styles.categoryModalContent}>
           {!showCustomCategoryForm && (
             <>
+              {/* Arama Çubuğu */}
+              <View style={styles.searchContainer}>
+                <MaterialIcons name="search" size={20} color={theme.colors.textSecondary} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Kategori ara..."
+                  value={categorySearchText}
+                  onChangeText={setCategorySearchText}
+                  placeholderTextColor={theme.colors.textSecondary}
+                />
+                {categorySearchText.length > 0 && (
+                  <TouchableOpacity onPress={() => setCategorySearchText('')}>
+                    <MaterialIcons name="close" size={20} color={theme.colors.textSecondary} />
+                  </TouchableOpacity>
+                )}
+              </View>
+
               <TouchableOpacity
                 style={styles.addCategoryButton}
                 onPress={() => setShowCustomCategoryForm(true)}
@@ -476,7 +569,7 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
               </TouchableOpacity>
 
               <View style={styles.categoryGrid}>
-                {categories.map(renderCategoryOption)}
+                {filteredCategories.map(renderCategoryOption)}
               </View>
             </>
           )}
@@ -489,46 +582,124 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
 
   return (
     <>
-      <Modal visible={visible} animationType="none" presentationStyle="pageSheet">
-        <SafeAreaView style={styles.container}>
-          <Animated.View style={[styles.modal, { transform: [{ translateY: slideAnim }] }]}>
-            {/* Header */}
-            <LinearGradient
-              colors={type === 'income' ? ['#48BB78', '#38A169'] : ['#F56565', '#E53E3E']}
-              style={styles.header}
-            >
-              <TouchableOpacity onPress={handleClose}>
-                <MaterialIcons name="close" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-              <Text style={styles.headerTitle}>
-                {type === 'income' ? 'Gelir Ekle' : 'Gider Ekle'}
-              </Text>
-              <TouchableOpacity onPress={handleSave}>
-                <Text style={styles.saveText}>Kaydet</Text>
-              </TouchableOpacity>
-            </LinearGradient>
+      <Modal visible={visible} animationType="none" presentationStyle="fullScreen">
+        <KeyboardAvoidingView 
+          style={styles.container}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -200}
+        >
+          <SafeAreaView style={styles.container}>
+            <Animated.View style={[styles.modal, { transform: [{ translateY: slideAnim }] }]}>
+              {/* Header */}
+              <LinearGradient
+                colors={type === 'income' ? ['#48BB78', '#38A169'] : ['#F56565', '#E53E3E']}
+                style={styles.header}
+              >
+                <TouchableOpacity onPress={handleClose}>
+                  <MaterialIcons name="close" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+                <Text style={styles.headerTitle}>
+                  {type === 'income' ? 'Gelir Ekle' : 'Gider Ekle'}
+                </Text>
+                <TouchableOpacity onPress={handleSave}>
+                  <Text style={styles.saveText}>Kaydet</Text>
+                </TouchableOpacity>
+                          </LinearGradient>
 
-            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-              {/* Amount Section */}
-              <Animated.View style={[styles.section, { transform: [{ scale: scaleAnim }] }]}>
-                <Text style={styles.sectionTitle}>Miktar</Text>
-                <View style={styles.amountContainer}>
-                  <TextInput
-                    style={styles.amountInput}
-                    value={amount}
-                    onChangeText={(text) => handleCurrencyInput(text, setAmount)}
-                    placeholder="0,00"
-                    keyboardType="numeric"
-                    selectTextOnFocus
-                  />
-                  <Text style={styles.currencySymbol}>₺</Text>
-                </View>
-                
-                <Text style={styles.quickAmountLabel}>Hızlı Miktar Seçimi</Text>
-                <View style={styles.quickAmounts}>
-                  {quickAmounts.map(renderQuickAmount)}
-                </View>
-              </Animated.View>
+            {/* Amount Section - Inside ScrollView */}
+                          <ScrollView 
+                ref={scrollViewRef}
+                style={styles.content} 
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                bounces={false}
+                scrollEnabled={true}
+                alwaysBounceVertical={false}
+                keyboardDismissMode="none"
+                automaticallyAdjustContentInsets={false}
+                contentInsetAdjustmentBehavior="never"
+              >
+                <Animated.View style={[styles.section, { transform: [{ scale: scaleAnim }] }]}>
+                  <Text style={styles.sectionTitle}>Miktar</Text>
+                  <View style={styles.amountContainer}>
+                    <TextInput
+                      ref={amountInputRef}
+                      style={styles.amountInput}
+                      value={amount}
+                      onChangeText={(text) => {
+                        // Sadece rakam ve virgül kabul et, format yapma
+                        const cleanText = text.replace(/[^0-9,]/g, '');
+                        setAmount(cleanText);
+                      }}
+                      placeholder="0,00"
+                      keyboardType="numeric"
+                      selectTextOnFocus
+                      onFocus={() => {
+                        // Miktar input'a focus olduğunda yumuşak scroll
+                        setTimeout(() => {
+                          scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+                        }, 150);
+                      }}
+                      onBlur={() => {
+                        // Input'tan çıkıldığında format yap
+                        if (amount) {
+                          let formattedAmount = amount;
+                          
+                          // Virgül kontrolü - sadece bir tane olsun
+                          if (amount.split(',').length > 2) {
+                            const parts = amount.split(',');
+                            formattedAmount = parts[0] + ',' + parts.slice(1).join('');
+                          }
+                          
+                          // Virgülden sonra maksimum 2 rakam
+                          if (formattedAmount.includes(',')) {
+                            const [integer, decimal] = formattedAmount.split(',');
+                            if (decimal && decimal.length > 2) {
+                              formattedAmount = integer + ',' + decimal.substring(0, 2);
+                            }
+                          }
+                          
+                          // Binlik ayırıcıları ekle (sadece integer kısma)
+                          if (formattedAmount.includes(',')) {
+                            const [integer, decimal] = formattedAmount.split(',');
+                            if (integer.length > 3) {
+                              const formattedInteger = integer.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+                              formattedAmount = formattedInteger + ',' + decimal;
+                            }
+                          } else if (formattedAmount.length > 3) {
+                            formattedAmount = formattedAmount.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+                          }
+                          
+                          // Eksik 0'ları ekle
+                          if (!formattedAmount.includes(',')) {
+                            formattedAmount = formattedAmount + ',00';
+                          } else if (formattedAmount.endsWith(',')) {
+                            formattedAmount = formattedAmount + '00';
+                          } else if (formattedAmount.endsWith(',0')) {
+                            formattedAmount = formattedAmount + '0';
+                          }
+                          
+                          setAmount(formattedAmount);
+                        }
+                      }}
+                    />
+                    <Text style={styles.currencySymbol}>₺</Text>
+                  </View>
+                  
+                  <Text style={styles.quickAmountLabel}>Hızlı Miktar Seçimi</Text>
+                  <View style={styles.quickAmounts}>
+                    {quickAmounts.map(renderQuickAmount)}
+                  </View>
+                  
+                  {/* Bilgilendirme */}
+                  <View style={styles.infoContainer}>
+                    <MaterialIcons name="info-outline" size={16} color={theme.colors.textSecondary} />
+                    <Text style={styles.infoText}>
+                      Küsürat (kuruş) yazılacaksa, tutar girildikten sonra virgül (,) koyunuz.
+                    </Text>
+                  </View>
+                </Animated.View>
 
               {/* Category Section */}
               <View style={styles.section}>
@@ -597,12 +768,19 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Açıklama</Text>
                 <TextInput
+                  ref={descriptionInputRef}
                   style={styles.descriptionInput}
                   value={description}
                   onChangeText={setDescription}
                   placeholder="İşlem açıklaması (opsiyonel)"
                   multiline
                   numberOfLines={2}
+                  onFocus={() => {
+                    // Açıklama input'a focus olduğunda scroll'u yukarı getir
+                    setTimeout(() => {
+                      scrollViewRef.current?.scrollTo({ y: 100, animated: true });
+                    }, 100);
+                  }}
                 />
               </View>
 
@@ -641,11 +819,11 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
                 <Text style={styles.sectionTitle}>Tarih</Text>
                 <TouchableOpacity
                   style={styles.dateSelector}
-                  onPress={() => setShowDatePicker(true)}
+                  onPress={() => setShowDateModal(true)}
                 >
                   <MaterialIcons name="calendar-today" size={20} color={theme.colors.textSecondary} />
                   <Text style={styles.dateText}>
-                    {selectedDate.toLocaleDateString('tr-TR', {
+                    {date.toLocaleDateString('tr-TR', {
                       day: '2-digit',
                       month: 'long',
                       year: 'numeric'
@@ -727,28 +905,53 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Notlar</Text>
                 <TextInput
+                  ref={notesInputRef}
                   style={styles.notesInput}
                   value={notes}
                   onChangeText={setNotes}
                   placeholder="Ek notlar (opsiyonel)"
                   multiline
                   numberOfLines={3}
+                  onFocus={() => {
+                    // Notes input'a focus olduğunda scroll'u yukarı getir
+                    setTimeout(() => {
+                      scrollViewRef.current?.scrollTo({ y: 200, animated: true });
+                    }, 100);
+                  }}
                 />
               </View>
 
               <View style={styles.bottomPadding} />
-            </ScrollView>
-          </Animated.View>
-        </SafeAreaView>
+              
+              {/* Action Buttons */}
+              <View style={styles.actionButtonsContainer}>
+                <TouchableOpacity 
+                  style={styles.cancelButton}
+                  onPress={onClose}
+                >
+                  <Text style={styles.cancelButtonText}>İptal</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.saveButton}
+                  onPress={handleSaveTransaction}
+                >
+                  <Text style={styles.saveButtonText}>Kaydet</Text>
+                </TouchableOpacity>
+              </View>
+              </ScrollView>
+            </Animated.View>
 
-        {showDatePicker && (
-          <DateTimePicker
-            value={selectedDate}
-            mode="date"
-            display="default"
-            onChange={handleDateChange}
-          />
-        )}
+            {showDateModal && (
+              <DateTimePicker
+                value={date}
+                mode="date"
+                display="default"
+                onChange={handleDateChange}
+              />
+            )}
+          </SafeAreaView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {renderCategoryModal()}
@@ -761,15 +964,13 @@ const DetailedAddTransactionModal = ({ visible, onClose, type = 'expense' }) => 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+    backgroundColor: theme.colors.background,
+    justifyContent: 'flex-start',
   },
 
   modal: {
     backgroundColor: theme.colors.background,
-    borderTopLeftRadius: theme.borderRadius.xl,
-    borderTopRightRadius: theme.borderRadius.xl,
-    height: height * 0.9,
+    height: height,
     overflow: 'hidden',
   },
 
@@ -779,6 +980,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.lg,
+    paddingTop: theme.spacing.xl,
     elevation: 4,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
@@ -803,8 +1005,23 @@ const styles = StyleSheet.create({
     padding: theme.spacing.lg,
   },
 
+  scrollContent: {
+    paddingBottom: 300,
+    minHeight: height * 1.2,
+    paddingTop: 0,
+  },
+
   section: {
     marginBottom: theme.spacing.xl,
+  },
+
+  amountSectionFixed: {
+    marginBottom: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.md,
+    backgroundColor: theme.colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
   },
 
   sectionTitle: {
@@ -1065,6 +1282,7 @@ const styles = StyleSheet.create({
   categoryModalContent: {
     flex: 1,
     padding: theme.spacing.lg,
+    paddingBottom: theme.spacing.xl * 3, // Daha fazla alt padding
   },
 
   addCategoryButton: {
@@ -1638,6 +1856,94 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     marginBottom: theme.spacing.md,
     marginTop: theme.spacing.sm,
+  },
+
+  // Action Buttons Styles
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.lg,
+    gap: theme.spacing.md,
+  },
+
+  cancelButton: {
+    flex: 1,
+    backgroundColor: theme.colors.border,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    borderRadius: theme.borderRadius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.textSecondary,
+  },
+
+  saveButton: {
+    flex: 1,
+    backgroundColor: theme.colors.primary,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    borderRadius: theme.borderRadius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 2,
+    shadowColor: theme.colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+
+  saveButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+
+  // Info Container Styles
+  infoContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: theme.colors.primary + '08',
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    marginTop: theme.spacing.md,
+  },
+
+  infoText: {
+    flex: 1,
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    marginLeft: theme.spacing.sm,
+    lineHeight: 18,
+  },
+
+  // Search Styles
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.cards,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: theme.colors.textPrimary,
+    marginLeft: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
   },
 });
 

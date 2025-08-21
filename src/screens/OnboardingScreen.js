@@ -7,10 +7,12 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { theme } from '../styles/theme';
 import { globalStyles } from '../styles/globalStyles';
 import CustomButton from '../components/ui/CustomButton';
+import { useAuth } from '../context/AuthContext';
 
 const { width } = Dimensions.get('window');
 
 const OnboardingScreen = ({ navigation }) => {
+  const { completeOnboarding } = useAuth();
   const [currentPage, setCurrentPage] = useState(0);
   const scrollViewRef = useRef(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -119,13 +121,15 @@ const OnboardingScreen = ({ navigation }) => {
     }
   };
 
-  const handleSkip = () => {
+  const handleSkip = async () => {
     // Onboarding'i atla ve auth ekranına git
+    await completeOnboarding();
     navigation.replace('Auth');
   };
 
-  const handleFinish = () => {
+  const handleFinish = async () => {
     // Onboarding tamamlandı, auth ekranına git
+    await completeOnboarding();
     navigation.replace('Auth');
   };
 
