@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Anima
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
-import { LineChart } from 'react-native-chart-kit';
+import { VictoryLine, VictoryChart, VictoryAxis, VictoryTheme, VictoryArea } from 'victory-native';
 import { theme } from '../../styles/theme';
 import { goldCurrencyData, goldCurrencyFunctions } from '../../utils/goldCurrencyData';
 import { formatCurrency } from '../../utils/formatters';
