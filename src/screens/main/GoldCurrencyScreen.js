@@ -1,6 +1,6 @@
 // FinanceFlow - Gold & Currency Screen
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, RefreshControl, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, RefreshControl, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -18,6 +18,8 @@ const GoldCurrencyScreen = ({ navigation }) => {
   const [selectedGoldType, setSelectedGoldType] = useState(null);
   const [goldQuantity, setGoldQuantity] = useState('');
   const [goldPrice, setGoldPrice] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -409,20 +411,45 @@ const GoldCurrencyScreen = ({ navigation }) => {
         {renderTabButton('portfolio', 'Portföy', 'account-balance-wallet')}
       </View>
 
+      {/* Loading State */}
+      {loading && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.loadingText}>Altın ve döviz verileri yükleniyor...</Text>
+        </View>
+      )}
+
+      {/* Error State */}
+      {error && !loading && (
+        <View style={styles.errorContainer}>
+          <MaterialIcons name="error" size={64} color={theme.colors.error} />
+          <Text style={styles.errorTitle}>Hata Oluştu</Text>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => {
+            setError(null);
+            onRefresh();
+          }}>
+            <Text style={styles.retryButtonText}>Tekrar Dene</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Content */}
-      <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
-        <ScrollView 
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-        >
-          {selectedTab === 'rates' && renderRatesTab()}
-          {selectedTab === 'gold' && renderGoldTab()}
-          {selectedTab === 'portfolio' && renderPortfolioTab()}
-          <View style={styles.bottomPadding} />
-        </ScrollView>
-      </Animated.View>
+      {!loading && !error && (
+        <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
+          <ScrollView 
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+          >
+            {selectedTab === 'rates' && renderRatesTab()}
+            {selectedTab === 'gold' && renderGoldTab()}
+            {selectedTab === 'portfolio' && renderPortfolioTab()}
+            <View style={styles.bottomPadding} />
+          </ScrollView>
+        </Animated.View>
+      )}
 
       {renderAddGoldModal()}
     </SafeAreaView>
@@ -988,6 +1015,52 @@ const styles = StyleSheet.create({
 
   bottomPadding: {
     height: 80,
+  },
+
+  // Loading and error styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xl,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.md,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.xl,
+    paddingVertical: theme.spacing.xl,
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+    marginTop: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.lg,
+  },
+  retryButton: {
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

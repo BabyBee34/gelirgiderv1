@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { theme } from '../../styles/theme';
-import { testUser, testFunctions } from '../../utils/testData';
+// Mock data import kaldırıldı
 import { formatCurrency, formatCurrencyInput, parseCurrency } from '../../utils/formatters';
 import { transactionStorage } from '../../utils/storage';
 import { formValidation, VALIDATION_SCHEMAS } from '../../utils/validation';
@@ -17,7 +17,7 @@ const AddTransactionModal = ({ visible, onClose, transactionType = 'expense', on
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
-  const [selectedAccount, setSelectedAccount] = useState(testUser.accounts[0]);
+  const [selectedAccount, setSelectedAccount] = useState(null);
   const [date, setDate] = useState(new Date());
   const [showCategories, setShowCategories] = useState(false);
   const [showAccounts, setShowAccounts] = useState(false);

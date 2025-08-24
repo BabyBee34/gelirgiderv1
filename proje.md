@@ -333,4 +333,3 @@ Error: #F56565 (Red)
 
 ---
 
-**ÖNEMLİ NOT:** Bu tasarım aşamasında hiçbir backend entegrasyonu yapmayın. Sadece statik data ile mockup oluşturun. Tüm API calls ve database operations placeholder olarak bırakın. Odak %100 kullanıcı deneyimi ve görsel tasarım olmalı.

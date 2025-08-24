@@ -19,7 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { theme } from '../../styles/theme';
-import { testUser } from '../../utils/testData';
+// Mock data import kaldırıldı
 import { formatCurrency } from '../../utils/formatters';
 
 const { width, height } = Dimensions.get('window');

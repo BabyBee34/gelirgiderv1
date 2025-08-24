@@ -1,11 +1,11 @@
 // FinanceFlow - Modern Cards Screen
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, FlatList, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, FlatList, Modal, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { theme } from '../../styles/theme';
-import { testUser } from '../../utils/testData';
+// testUser artık kullanılmıyor - gerçek Supabase verileri kullanılıyor
 import { formatCurrency } from '../../utils/formatters';
 import CardSettingsModal from './CardSettingsModal';
 
@@ -41,8 +41,10 @@ const parseDateMaybe = (value) => {
 
 const CardsScreen = ({ navigation }) => {
   const [selectedCard, setSelectedCard] = useState(0);
-  const [accounts, setAccounts] = useState(testUser.accounts);
-  const [selectedAccount, setSelectedAccount] = useState(testUser.accounts[0]);
+  const [accounts, setAccounts] = useState([]);
+  const [selectedAccount, setSelectedAccount] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [cardTypeModalVisible, setCardTypeModalVisible] = useState(false);
   const [addCardModalVisible, setAddCardModalVisible] = useState(false);
@@ -69,8 +71,12 @@ const CardsScreen = ({ navigation }) => {
       Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
       Animated.timing(scaleAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
     ]).start();
-    setSelectedAccount(testUser.accounts[0]);
-  }, []);
+    
+    // İlk hesap seçili değilse ve hesaplar varsa ilkini seç
+    if (!selectedAccount && accounts.length > 0) {
+      setSelectedAccount(accounts[0]);
+    }
+  }, [accounts, selectedAccount]);
 
   const handleUpdateAccount = (updatedAccount) => {
     console.log('Account updated:', updatedAccount);
@@ -162,10 +168,8 @@ const CardsScreen = ({ navigation }) => {
   const isCreditType = (type) => ['credit', 'virtual', 'supplementary', 'business'].includes(type);
 
   const getRecentTransactionsForCard = (accountId) => {
-    return testUser.transactions
-      .filter(t => t.accountId === accountId)
-      .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .slice(0, 3);
+    // Şimdilik boş array döndür - gerçek veriler yüklendiğinde güncellenecek
+    return [];
   };
 
   const renderCard = (item, index) => {
@@ -273,9 +277,8 @@ const CardsScreen = ({ navigation }) => {
   };
 
   const getCategoryName = (categoryId) => {
-    const allCategories = [...testUser.incomeCategories, ...testUser.expenseCategories];
-    const category = allCategories.find(cat => cat.id === categoryId);
-    return category ? category.name : 'Kategori';
+    // Şimdilik default değer döndür - gerçek kategoriler yüklendiğinde güncellenecek
+    return 'Kategori';
   };
 
   const recentTransactions = getRecentTransactionsForCard(selectedAccount?.id);
@@ -395,7 +398,7 @@ const CardsScreen = ({ navigation }) => {
     const due = parseDateMaybe(selectedAccount.dueDate);
     if (!due) return;
     const today = new Date();
-    if (today > due && (selectedAccount.balance || 0) < 0) {
+    if (today > due && (selectedAccount?.balance || 0) < 0) {
       setPaymentReminderModalVisible(true);
     }
   };
@@ -452,37 +455,66 @@ const CardsScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
+        {/* Loading State */}
+        {loading && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={styles.loadingText}>Kart bilgileri yükleniyor...</Text>
+          </View>
+        )}
+
+        {/* Error State */}
+        {error && !loading && (
+          <View style={styles.errorContainer}>
+            <MaterialIcons name="error" size={64} color={theme.colors.error} />
+            <Text style={styles.errorTitle}>Hata Oluştu</Text>
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={() => {
+              setError(null);
+              // TODO: Implement retry logic
+            }}>
+              <Text style={styles.retryButtonText}>Tekrar Dene</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Cards Carousel */}
-        <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }] }}>
-          <ScrollView
-            ref={scrollViewRef}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            snapToInterval={CARD_WIDTH + theme.spacing.md}
-            decelerationRate="fast"
-            contentContainerStyle={styles.cardsContainer}
-            onMomentumScrollEnd={(event) => {
-              const index = Math.round(event.nativeEvent.contentOffset.x / (CARD_WIDTH + theme.spacing.md));
-              setSelectedCard(index);
-              setSelectedAccount(testUser.accounts[index]);
-            }}
-            onScrollEndDrag={(event) => {
-              const index = Math.round(event.nativeEvent.contentOffset.x / (CARD_WIDTH + theme.spacing.md));
-              setSelectedCard(index);
-              setSelectedAccount(testUser.accounts[index]);
-            }}
-          >
-            {testUser.accounts.map((item, index) => (
-              <View key={item.id}>
-                {renderCard(item, index)}
-              </View>
-            ))}
-          </ScrollView>
-        </Animated.View>
+        {!loading && !error && (
+          <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }] }}>
+            <ScrollView
+              ref={scrollViewRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={CARD_WIDTH + theme.spacing.md}
+              decelerationRate="fast"
+              contentContainerStyle={styles.cardsContainer}
+              onMomentumScrollEnd={(event) => {
+                const index = Math.round(event.nativeEvent.contentOffset.x / (CARD_WIDTH + theme.spacing.md));
+                setSelectedCard(index);
+                if (accounts[index]) {
+                  setSelectedAccount(accounts[index]);
+                }
+              }}
+              onScrollEndDrag={(event) => {
+                const index = Math.round(event.nativeEvent.contentOffset.x / (CARD_WIDTH + theme.spacing.md));
+                setSelectedCard(index);
+                if (accounts[index]) {
+                  setSelectedAccount(accounts[index]);
+                }
+              }}
+            >
+              {accounts.map((item, index) => (
+                <View key={item.id}>
+                  {renderCard(item, index)}
+                </View>
+              ))}
+            </ScrollView>
+          </Animated.View>
+        )}
 
         {/* Card Indicators */}
         <View style={styles.indicators}>
-          {testUser.accounts.map((_, index) => (
+          {accounts.map((_, index) => (
             <View
               key={index}
               style={[
@@ -496,56 +528,56 @@ const CardsScreen = ({ navigation }) => {
         {/* Selected Card Details */}
         {selectedAccount && (
           <View style={styles.cardDetailsContainer}>
-            <Text style={styles.sectionTitle}>{selectedAccount.name} Detayları</Text>
+            <Text style={styles.sectionTitle}>{selectedAccount?.name || 'Hesap'} Detayları</Text>
             
             {/* Account Summary */}
             <View style={styles.accountSummary}>
               <View style={styles.summaryRow}>
                 <View style={styles.summaryItem}>
                   <Text style={styles.summaryLabel}>Hesap Türü</Text>
-                  <Text style={styles.summaryValue}>{getCardType(selectedAccount.type)}</Text>
+                  <Text style={styles.summaryValue}>{getCardType(selectedAccount?.type || 'debit')}</Text>
                 </View>
                 <View style={styles.summaryItem}>
                   <Text style={styles.summaryLabel}>Banka</Text>
-                  <Text style={styles.summaryValue}>{selectedAccount.bankName || 'Banka'}</Text>
+                  <Text style={styles.summaryValue}>{selectedAccount?.bankName || 'Banka'}</Text>
                 </View>
               </View>
               
               <View style={styles.summaryRow}>
                 <View style={styles.summaryItem}>
                   <Text style={styles.summaryLabel}>
-                    {selectedAccount.type === 'credit' ? 'Kredi Limiti' : 'Bakiye'}
+                    {selectedAccount?.type === 'credit' ? 'Kredi Limiti' : 'Bakiye'}
                   </Text>
                   <Text style={styles.summaryValue}>
-                    {formatCurrency(selectedAccount.type === 'credit' ? (selectedAccount.creditLimit || 20000) : selectedAccount.balance)}
+                    {formatCurrency(selectedAccount?.type === 'credit' ? (selectedAccount?.creditLimit || 20000) : (selectedAccount?.balance || 0))}
                   </Text>
                 </View>
-                {selectedAccount.type === 'credit' && (
+                {selectedAccount?.type === 'credit' && (
                   <View style={styles.summaryItem}>
                     <Text style={styles.summaryLabel}>Kullanılan Kredi</Text>
                     <Text style={styles.summaryValue}>
-                      {formatCurrency(Math.abs(selectedAccount.balance))}
+                      {formatCurrency(Math.abs(selectedAccount?.balance || 0))}
                     </Text>
                   </View>
                 )}
               </View>
               
-              {selectedAccount.type === 'credit' && (
+              {selectedAccount?.type === 'credit' && (
                 <View style={styles.creditDetails}>
                   <View style={styles.creditProgressContainer}>
                     <View style={styles.creditProgressHeader}>
                       <Text style={styles.creditProgressLabel}>Kredi Kullanım Oranı</Text>
                       <Text style={styles.creditProgressPercentage}>
-                        %{Math.min((Math.abs(selectedAccount.balance) / (selectedAccount.creditLimit || 20000)) * 100, 100).toFixed(1)}
+                        %{Math.min((Math.abs(selectedAccount?.balance || 0) / (selectedAccount.creditLimit || 20000)) * 100, 100).toFixed(1)}
                       </Text>
                     </View>
                     <View style={styles.creditProgressBar}>
                       <View style={[
                         styles.creditProgressFill,
                         {
-                          width: `${Math.min((Math.abs(selectedAccount.balance) / (selectedAccount.creditLimit || 20000)) * 100, 100)}%`,
-                          backgroundColor: Math.abs(selectedAccount.balance) / (selectedAccount.creditLimit || 20000) > 0.8 ? '#F56565' :
-                                         Math.abs(selectedAccount.balance) / (selectedAccount.creditLimit || 20000) > 0.6 ? '#ED8936' : '#48BB78'
+                          width: `${Math.min((Math.abs(selectedAccount?.balance || 0) / (selectedAccount.creditLimit || 20000)) * 100, 100)}%`,
+                          backgroundColor: Math.abs(selectedAccount?.balance || 0) / (selectedAccount.creditLimit || 20000) > 0.8 ? '#F56565' :
+                                         Math.abs(selectedAccount?.balance || 0) / (selectedAccount.creditLimit || 20000) > 0.6 ? '#ED8936' : '#48BB78'
                         }
                       ]} />
                     </View>
@@ -555,13 +587,13 @@ const CardsScreen = ({ navigation }) => {
                     <View style={styles.creditInfoItem}>
                       <Text style={styles.creditInfoLabel}>Hesap Kesim</Text>
                       <Text style={styles.creditInfoValue}>
-                        {selectedAccount.statementDate || '20 Şubat 2024'}
+                        {selectedAccount?.statementDate || '20 Şubat 2024'}
                       </Text>
                     </View>
                     <View style={styles.creditInfoItem}>
                       <Text style={styles.creditInfoLabel}>Son Ödeme</Text>
                       <Text style={styles.creditInfoValue}>
-                        {selectedAccount.dueDate || '15 Mart 2024'}
+                        {selectedAccount?.dueDate || '15 Mart 2024'}
                       </Text>
                     </View>
                   </View>
@@ -570,13 +602,13 @@ const CardsScreen = ({ navigation }) => {
                     <View style={styles.creditInfoItem}>
                       <Text style={styles.creditInfoLabel}>Asgari Ödeme</Text>
                       <Text style={styles.creditInfoValue}>
-                        {formatCurrency(selectedAccount.previousPeriodDebt ? selectedAccount.previousPeriodDebt * 0.05 : (selectedAccount.creditLimit || 20000) * 0.05)}
+                        {formatCurrency(selectedAccount?.previousPeriodDebt ? selectedAccount?.previousPeriodDebt * 0.05 : (selectedAccount?.creditLimit || 20000) * 0.05)}
                       </Text>
                     </View>
                     <View style={styles.creditInfoItem}>
                       <Text style={styles.creditInfoLabel}>Mevcut Dönem</Text>
                       <Text style={styles.creditInfoValue}>
-                        {formatCurrency(selectedAccount.currentPeriodSpending || 0)}
+                        {formatCurrency(selectedAccount?.currentPeriodSpending || 0)}
                       </Text>
                     </View>
                   </View>
@@ -617,7 +649,7 @@ const CardsScreen = ({ navigation }) => {
                   </View>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Kullanılan Limit:</Text>
-                    <Text style={styles.detailValue}>{formatCurrency(Math.abs(selectedAccount.balance))}</Text>
+                    <Text style={styles.detailValue}>{formatCurrency(Math.abs(selectedAccount?.balance || 0))}</Text>
                   </View>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Faiz Oranı:</Text>
@@ -649,7 +681,7 @@ const CardsScreen = ({ navigation }) => {
               ) : (
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Bakiye:</Text>
-                  <Text style={styles.detailValue}>{formatCurrency(selectedAccount.balance)}</Text>
+                  <Text style={styles.detailValue}>{formatCurrency(selectedAccount?.balance || 0)}</Text>
                 </View>
               )}
 
@@ -937,7 +969,7 @@ const CardsScreen = ({ navigation }) => {
           <ScrollView style={styles.addCardForm} showsVerticalScrollIndicator={false}>
             <View style={styles.formSection}>
               <Text style={styles.formLabel}>Mevcut Bakiye</Text>
-              <Text style={[styles.formInput, styles.formInputDisabled]}>{formatCurrency(selectedAccount.balance)}</Text>
+              <Text style={[styles.formInput, styles.formInputDisabled]}>{formatCurrency(selectedAccount?.balance || 0)}</Text>
             </View>
             <View style={styles.formSection}>
               <Text style={styles.formLabel}>Güncellenecek Miktar</Text>
@@ -1796,6 +1828,52 @@ const styles = StyleSheet.create({
   formInputText: {
     fontSize: 16,
     color: theme.colors.textPrimary,
+    fontWeight: '600',
+  },
+
+  // Loading and error styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xl,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.md,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.xl,
+    paddingVertical: theme.spacing.xl,
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+    marginTop: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.lg,
+  },
+  retryButton: {
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
     fontWeight: '600',
   },
 });

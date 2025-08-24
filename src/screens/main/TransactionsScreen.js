@@ -1,32 +1,63 @@
 // FinanceFlow - Transactions Screen
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Dimensions, Animated, RefreshControl, TextInput, Modal } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Dimensions, Animated, RefreshControl, TextInput, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { theme } from '../../styles/theme';
-import { testUser } from '../../utils/testData';
+// Service imports - test için kaldırıldı
+// import transactionService from '../../services/transactionService';
+// import accountService from '../../services/accountService';
+// import categoryService from '../../services/categoryService';
 import { formatCurrency } from '../../utils/formatters';
 import DetailedAddTransactionModal from '../modals/DetailedAddTransactionModal';
-
-const { width } = Dimensions.get('window');
+import EmptyState from '../../components/ui/EmptyState';
 
 const TransactionsScreen = ({ navigation }) => {
+  // İlk console log - component başlangıcı
+  console.log('🔍 TransactionsScreen component başladı');
+
+  // State variables
+  const [transactions, setTransactions] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState('all');
-  const [searchVisible, setSearchVisible] = useState(false);
+  const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedFilter, setSelectedFilter] = useState('all');
+  const [selectedDateRange, setSelectedDateRange] = useState('month');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showScannerModal, setShowScannerModal] = useState(false);
+  const [showDetailedModal, setShowDetailedModal] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
+
+  // Refs
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const searchInputRef = useRef(null);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // Pagination state'leri
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
+
+  // UI state'leri
+  const [searchVisible, setSearchVisible] = useState(false);
   const [addTransactionVisible, setAddTransactionVisible] = useState(false);
-  const [showDateFilter, setShowDateFilter] = useState(false);
+  const [transactionType, setTransactionType] = useState('expense');
+
+  // Date filter state'leri
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(20);
-  const [transactionType, setTransactionType] = useState('expense');
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [showDateFilter, setShowDateFilter] = useState(false);
+
+  // Test: State'ler tanımlandı
+  console.log('🔍 TransactionsScreen state\'ler tanımlandı');
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -43,21 +74,80 @@ const TransactionsScreen = ({ navigation }) => {
 
 
 
+  // State'ler zaten yukarıda tanımlandı, burada tekrar tanımlamaya gerek yok
+
+  // Data yükle
+  useEffect(() => {
+    loadCategories();
+    loadTransactions();
+    loadAccounts();
+  }, []);
+
+  const loadCategories = async () => {
+    try {
+      setLoading(true);
+      // if (!services.categoryService) { // Removed service check
+      //   console.error('categoryService is undefined');
+      //   setError('Category service yüklenemedi');
+      //   return;
+      // }
+      // const categoriesData = await services.categoryService.getCategories(); // Removed service call
+      setCategories([]); // Placeholder
+      console.log('Placeholder: Categories loaded');
+    } catch (error) {
+      console.error('Error loading categories:', error);
+      setError('Kategoriler yüklenirken hata oluştu');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadTransactions = async () => {
+    try {
+      setLoading(true);
+      // if (!services.transactionService) { // Removed service check
+      //   console.error('transactionService is undefined');
+      //   setError('Transaction service yüklenemedi');
+      //   return;
+      // }
+      // const transactionsData = await services.transactionService.getTransactions(); // Removed service call
+      setTransactions([]); // Placeholder
+      console.log('Placeholder: Transactions loaded');
+    } catch (error) {
+      console.error('Error loading transactions:', error);
+      setError('İşlemler yüklenirken hata oluştu');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadAccounts = async () => {
+    try {
+      // if (!services.accountService) { // Removed service check
+      //   console.error('accountService is undefined');
+      //   return;
+      // }
+      // const accountsData = await services.accountService.getAccounts(); // Removed service call
+      setAccounts([]); // Placeholder
+      console.log('Placeholder: Accounts loaded');
+    } catch (error) {
+      console.error('Error loading accounts:', error);
+    }
+  };
+
   const getCategoryInfo = (categoryId) => {
-    if (!testUser.categories) {
+    if (!categories || categories.length === 0) {
       return { name: 'Kategori', icon: 'category', color: '#718096' };
     }
     
-    const allCategories = [
-      ...(testUser.categories.income || []), 
-      ...(testUser.categories.expense || [])
-    ];
-    const category = allCategories.find(cat => cat.id === categoryId);
+    const category = categories.find(cat => cat.id === categoryId);
     return category || { name: 'Kategori', icon: 'category', color: '#718096' };
   };
 
   const getFilteredTransactions = () => {
-    let filtered = [...testUser.transactions];
+    if (!transactions || transactions.length === 0) return [];
+    
+    let filtered = [...transactions];
     
     // Filter by type
     if (selectedFilter === 'income') {
@@ -181,7 +271,7 @@ const TransactionsScreen = ({ navigation }) => {
 
   const renderTransactionItem = ({ item }) => {
     const category = getCategoryInfo(item.categoryId);
-    const account = testUser.accounts.find(acc => acc.id === item.accountId);
+    const account = accounts.find(acc => acc.id === item.accountId);
     
     return (
       <TouchableOpacity style={styles.transactionItem}>
@@ -427,76 +517,91 @@ const TransactionsScreen = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
+      {/* Loading State */}
+      {loading && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.loadingText}>İşlemler yükleniyor...</Text>
+        </View>
+      )}
+
+      {/* Error State */}
+      {error && !loading && (
+        <View style={styles.errorContainer}>
+          <MaterialIcons name="error" size={64} color={theme.colors.error} />
+          <Text style={styles.errorTitle}>Hata Oluştu</Text>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => {
+            setError(null);
+            loadTransactions();
+            loadCategories();
+          }}>
+            <Text style={styles.retryButtonText}>Tekrar Dene</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Transactions List */}
-      <FlatList
-        data={paginatedGroups}
-        renderItem={renderDateGroup}
-        keyExtractor={(item) => item.date}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        contentContainerStyle={styles.listContainer}
-        ListFooterComponent={() => (
-          totalPages > 1 ? (
-            <View style={styles.paginationContainer}>
-              <TouchableOpacity 
-                style={[styles.paginationButton, currentPage === 1 && styles.paginationButtonDisabled]}
-                onPress={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                disabled={currentPage === 1}
-              >
-                <MaterialIcons name="chevron-left" size={20} color={currentPage === 1 ? theme.colors.textSecondary : theme.colors.primary} />
-              </TouchableOpacity>
+      {!loading && !error && (
+        <FlatList
+          data={paginatedGroups}
+          renderItem={renderDateGroup}
+          keyExtractor={(item) => item.date}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          contentContainerStyle={styles.listContainer}
+          ListFooterComponent={() => (
+            totalPages > 1 ? (
+              <View style={styles.paginationContainer}>
+                <TouchableOpacity 
+                  style={[styles.paginationButton, currentPage === 1 && styles.paginationButtonDisabled]}
+                  onPress={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <MaterialIcons name="chevron-left" size={20} color={currentPage === 1 ? theme.colors.textSecondary : theme.colors.primary} />
+                </TouchableOpacity>
+                
+                <View style={styles.paginationInfo}>
+                  <Text style={styles.paginationText}>
+                    {currentPage} / {totalPages}
+                  </Text>
+                  <Text style={styles.paginationSubText}>
+                    {filteredTransactions.length} işlem
+                  </Text>
+                </View>
               
-              <View style={styles.paginationInfo}>
-                <Text style={styles.paginationText}>
-                  {currentPage} / {totalPages}
-                </Text>
-                <Text style={styles.paginationSubText}>
-                  {filteredTransactions.length} işlem
-                </Text>
+                <TouchableOpacity 
+                  style={[styles.paginationButton, currentPage === totalPages && styles.paginationButtonDisabled]}
+                  onPress={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  <MaterialIcons name="chevron-right" size={20} color={currentPage === totalPages ? theme.colors.textSecondary : theme.colors.primary} />
+                </TouchableOpacity>
               </View>
-              
-              <TouchableOpacity 
-                style={[styles.paginationButton, currentPage === totalPages && styles.paginationButtonDisabled]}
-                onPress={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                disabled={currentPage === totalPages}
-              >
-                <MaterialIcons name="chevron-right" size={20} color={currentPage === totalPages ? theme.colors.textSecondary : theme.colors.primary} />
-              </TouchableOpacity>
-            </View>
-          ) : null
-        )}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <MaterialIcons 
-              name={searchQuery ? "search-off" : "receipt-long"} 
-              size={64} 
-              color={theme.colors.textSecondary} 
-            />
-            <Text style={styles.emptyTitle}>
-              {searchQuery ? 'Arama sonucu bulunamadı' : 'Henüz işlem yok'}
-            </Text>
-            <Text style={styles.emptySubtitle}>
-              {searchQuery 
-                ? 'Farklı anahtar kelimeler deneyin' 
-                : 'İlk işleminizi ekleyerek başlayın'
-              }
-            </Text>
-            {!searchQuery && (
-              <TouchableOpacity 
-                style={styles.emptyButton}
-                onPress={() => {
+            ) : null
+          )}
+          ListEmptyComponent={
+            searchQuery ? (
+              <EmptyState
+                type="search"
+                onAction={() => setSearchQuery('')}
+                size="medium"
+              />
+            ) : (
+              <EmptyState
+                type="transactions"
+                onAction={() => {
                   setTransactionType('expense');
                   setAddTransactionVisible(true);
                 }}
-              >
-                <Text style={styles.emptyButtonText}>İşlem Ekle</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        }
-      />
+                size="medium"
+              />
+            )
+          }
+        />
+      )}
 
       {/* Detailed Add Transaction Modal */}
       <DetailedAddTransactionModal
@@ -1255,6 +1360,50 @@ const styles = StyleSheet.create({
 
   modernFilterButtonTextActive: {
     color: '#ffffff',
+  },
+
+  // Loading and error styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.md,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.xl,
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+    marginTop: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.lg,
+  },
+  retryButton: {
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

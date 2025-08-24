@@ -1,32 +1,23 @@
 // FinanceFlow - Main App Component
-import React, { useEffect } from 'react';
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
-import { Keyboard, Platform } from 'react-native';
 import { AuthProvider } from './src/context/AuthContext';
+import { ToastProvider } from './src/context/ToastContext';
+import { FeedbackProvider } from './src/context/FeedbackContext';
 import AppNavigator from './src/navigation/AppNavigator';
-import { theme } from './src/styles/theme';
 
 export default function App() {
-  useEffect(() => {
-    // Klavye event listener'ları
-    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
-      // Klavye açıldığında yapılacak işlemler
-    });
-    
-    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
-      // Klavye kapandığında yapılacak işlemler
-    });
-
-    return () => {
-      keyboardDidShowListener?.remove();
-      keyboardDidHideListener?.remove();
-    };
-  }, []);
-
   return (
     <AuthProvider>
-      <StatusBar style="dark" backgroundColor={theme.colors.background} />
-      <AppNavigator />
+      <ToastProvider>
+        <FeedbackProvider>
+          <NavigationContainer>
+            <StatusBar style="auto" />
+            <AppNavigator />
+          </NavigationContainer>
+        </FeedbackProvider>
+      </ToastProvider>
     </AuthProvider>
   );
 }

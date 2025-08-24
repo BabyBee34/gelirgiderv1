@@ -8,16 +8,23 @@ import { theme } from '../../styles/theme';
 import { globalStyles } from '../../styles/globalStyles';
 import CustomButton from '../../components/ui/CustomButton';
 import { useAuth } from '../../context/AuthContext';
+import { toast } from '../../context/ToastContext';
+import { validation, ERROR_MESSAGES } from '../../utils/validation';
 
 const { width, height } = Dimensions.get('window');
 
 const LoginScreen = ({ navigation }) => {
-  const { login } = useAuth();
-  const [email, setEmail] = useState('test@financeflow.app');
-  const [password, setPassword] = useState('123456');
+  const { signIn } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  
+  // Validation states
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [touched, setTouched] = useState({ email: false, password: false });
   // Input refs
   const emailInputRef = useRef(null);
   const passwordInputRef = useRef(null);
@@ -48,25 +55,53 @@ const LoginScreen = ({ navigation }) => {
     ]).start();
   }, []);
 
+  // Validation functions
+  const validateEmail = (value) => {
+    const error = validation.email(value);
+    setEmailError(error || '');
+    return !error;
+  };
+
+  const validatePassword = (value) => {
+    const error = validation.password(value, { minLength: 6 });
+    setPasswordError(error || '');
+    return !error;
+  };
+
+  const validateForm = () => {
+    const isEmailValid = validateEmail(email);
+    const isPasswordValid = validatePassword(password);
+    return isEmailValid && isPasswordValid;
+  };
+
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert('Hata', 'Lütfen e-posta ve şifre alanlarını doldurun');
+    if (!validateForm()) {
       return;
     }
 
     setLoading(true);
     
     try {
-      const result = await login(email.trim(), password, rememberMe);
+      const result = await signIn(email.trim(), password);
       
       if (result.success) {
         // Login successful - navigation will be handled by AppNavigator
+        toast.success('Giriş başarılı! Hoş geldiniz.', {
+          title: 'Başarılı',
+          duration: 3000
+        });
         console.log('Login successful:', result.user);
       } else {
-        Alert.alert('Giriş Hatası', result.error);
+        toast.error(result.error || 'Giriş yapılamadı', {
+          title: 'Giriş Hatası',
+          duration: 5000
+        });
       }
     } catch (error) {
-      Alert.alert('Hata', 'Giriş yapılırken bir hata oluştu');
+      toast.error('Giriş yapılırken bir hata oluştu', {
+        title: 'Hata',
+        duration: 5000
+      });
       console.error('Login error:', error);
     } finally {
       setLoading(false);
@@ -75,6 +110,29 @@ const LoginScreen = ({ navigation }) => {
 
   const handleForgotPassword = () => {
     navigation.navigate('ForgotPassword');
+  };
+
+  const handleEmailChange = (value) => {
+    setEmail(value);
+    if (touched.email) {
+      validateEmail(value);
+    }
+  };
+
+  const handlePasswordChange = (value) => {
+    setPassword(value);
+    if (touched.password) {
+      validatePassword(value);
+    }
+  };
+
+  const handleInputBlur = (field) => {
+    setTouched(prev => ({ ...prev, [field]: true }));
+    if (field === 'email') {
+      validateEmail(email);
+    } else if (field === 'password') {
+      validatePassword(password);
+    }
   };
 
   const handleRegister = () => {
@@ -147,16 +205,18 @@ const LoginScreen = ({ navigation }) => {
                   <TextInput
                     ref={emailInputRef}
                     value={email}
-                    onChangeText={setEmail}
+                    onChangeText={handleEmailChange}
                     placeholder="E-posta adresiniz"
                     placeholderTextColor="rgba(255,255,255,0.6)"
                     keyboardType="email-address"
-                    style={styles.directInput}
+                    style={[styles.directInput, emailError && styles.inputError]}
                     autoCapitalize="none"
                     autoCorrect={false}
                     returnKeyType="next"
                     onSubmitEditing={() => passwordInputRef.current?.focus()}
+                    onBlur={() => handleInputBlur('email')}
                   />
+                  {emailError && <Text style={styles.errorText}>{emailError}</Text>}
                 </View>
               </View>
 
@@ -172,16 +232,18 @@ const LoginScreen = ({ navigation }) => {
                   <TextInput
                     ref={passwordInputRef}
                     value={password}
-                    onChangeText={setPassword}
+                    onChangeText={handlePasswordChange}
                     placeholder="Şifreniz"
                     placeholderTextColor="rgba(255,255,255,0.6)"
                     secureTextEntry={!showPassword}
-                    style={styles.directInput}
+                    style={[styles.directInput, passwordError && styles.inputError]}
                     autoCapitalize="none"
                     autoCorrect={false}
                     returnKeyType="done"
                     onSubmitEditing={handleLogin}
+                    onBlur={() => handleInputBlur('password')}
                   />
+                  {passwordError && <Text style={styles.errorText}>{passwordError}</Text>}
                   <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
                     <MaterialIcons 
                       name={showPassword ? "visibility" : "visibility-off"} 
@@ -392,6 +454,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#FFFFFF',
     paddingVertical: theme.spacing.lg,
+    fontWeight: '500',
+  },
+
+  inputError: {
+    borderColor: '#F56565',
+    borderWidth: 1,
+  },
+
+  errorText: {
+    color: '#F56565',
+    fontSize: 12,
+    marginTop: theme.spacing.xs,
+    marginLeft: theme.spacing.lg,
     fontWeight: '500',
   },
   

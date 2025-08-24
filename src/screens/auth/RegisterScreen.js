@@ -13,7 +13,7 @@ import { useAuth } from '../../context/AuthContext';
 const { width, height } = Dimensions.get('window');
 
 const RegisterScreen = ({ navigation }) => {
-  const { register, checkUserExists } = useAuth();
+  const { signUp } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -26,6 +26,8 @@ const RegisterScreen = ({ navigation }) => {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [termsModalVisible, setTermsModalVisible] = useState(false);
+  const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
   
   // Input refs
   const firstNameInputRef = useRef(null);
@@ -117,7 +119,10 @@ const RegisterScreen = ({ navigation }) => {
     setLoading(true);
     
     try {
-      const result = await register(formData);
+      const result = await signUp(formData.email, formData.password, {
+        firstName: formData.firstName,
+        lastName: formData.lastName
+      });
       
       if (result.success) {
         Alert.alert('Başarılı', 'Hesabınız başarıyla oluşturuldu!', [
@@ -299,8 +304,12 @@ const RegisterScreen = ({ navigation }) => {
             )}
           </View>
           <Text style={styles.termsText}>
-            <Text style={styles.termsLink}>Kullanım şartları</Text> ve{' '}
-            <Text style={styles.termsLink}>Gizlilik politikası</Text>'nı kabul ediyorum
+            <TouchableOpacity onPress={() => setTermsModalVisible(true)}>
+              <Text style={styles.termsLink}>Kullanım şartları</Text>
+            </TouchableOpacity> ve{' '}
+            <TouchableOpacity onPress={() => setPrivacyModalVisible(true)}>
+              <Text style={styles.termsLink}>Gizlilik politikası</Text>
+            </TouchableOpacity>'nı kabul ediyorum
           </Text>
         </TouchableOpacity>
       </View>

@@ -8,6 +8,7 @@ import { theme } from '../../styles/theme';
 import { globalStyles } from '../../styles/globalStyles';
 import CustomButton from '../../components/ui/CustomButton';
 import { useAuth } from '../../context/AuthContext';
+import { validation } from '../../utils/validation';
 
 const { width, height } = Dimensions.get('window');
 
@@ -16,6 +17,10 @@ const ForgotPasswordScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
+  
+  // Validation states
+  const [emailError, setEmailError] = useState('');
+  const [touched, setTouched] = useState({ email: false });
   
   // Input ref
   const emailInputRef = useRef(null);
@@ -49,14 +54,19 @@ const ForgotPasswordScreen = ({ navigation }) => {
 
 
 
-  const handleResetPassword = async () => {
-    if (!email.trim()) {
-      Alert.alert('Hata', 'Lütfen e-posta adresinizi girin');
-      return;
-    }
+  // Validation functions
+  const validateEmail = (value) => {
+    const error = validation.email(value);
+    setEmailError(error || '');
+    return !error;
+  };
 
-    if (!email.includes('@')) {
-      Alert.alert('Hata', 'Lütfen geçerli bir e-posta adresi girin');
+  const validateForm = () => {
+    return validateEmail(email);
+  };
+
+  const handleResetPassword = async () => {
+    if (!validateForm()) {
       return;
     }
 
@@ -91,9 +101,25 @@ const ForgotPasswordScreen = ({ navigation }) => {
     navigation.navigate('Login');
   };
 
+  const handleEmailChange = (value) => {
+    setEmail(value);
+    if (touched.email) {
+      validateEmail(value);
+    }
+  };
+
+  const handleInputBlur = (field) => {
+    setTouched(prev => ({ ...prev, [field]: true }));
+    if (field === 'email') {
+      validateEmail(email);
+    }
+  };
+
   const handleResendEmail = () => {
     setEmailSent(false);
     setEmail('');
+    setEmailError('');
+    setTouched({ email: false });
     emailInputRef.current?.focus();
   };
 
@@ -264,16 +290,18 @@ const ForgotPasswordScreen = ({ navigation }) => {
                   <TextInput
                     ref={emailInputRef}
                     value={email}
-                    onChangeText={setEmail}
+                    onChangeText={handleEmailChange}
                     placeholder="E-posta adresiniz"
                     placeholderTextColor="rgba(255,255,255,0.6)"
                     keyboardType="email-address"
-                    style={styles.directInput}
+                    style={[styles.directInput, emailError && styles.inputError]}
                     autoCapitalize="none"
                     autoCorrect={false}
                     returnKeyType="done"
                     onSubmitEditing={handleResetPassword}
+                    onBlur={() => handleInputBlur('email')}
                   />
+                  {emailError && <Text style={styles.errorText}>{emailError}</Text>}
                 </View>
               </View>
 
@@ -480,6 +508,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#FFFFFF',
     paddingVertical: theme.spacing.lg,
+    fontWeight: '500',
+  },
+
+  inputError: {
+    borderColor: '#F56565',
+    borderWidth: 1,
+  },
+
+  errorText: {
+    color: '#F56565',
+    fontSize: 12,
+    marginTop: theme.spacing.xs,
+    marginLeft: theme.spacing.lg,
     fontWeight: '500',
   },
   

@@ -20,11 +20,16 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { theme } from '../../styles/theme';
-import { testUser } from '../../utils/testData';
+
 import { formatCurrency, currencyToNumber } from '../../utils/formatters';
 import { categoryIcons, categoryColors, getIconsByCategory } from '../../utils/iconColorData';
 import { transactionStorage } from '../../utils/storage';
 import { formValidation, VALIDATION_SCHEMAS } from '../../utils/validation';
+import transactionService from '../../services/transactionService';
+import categoryService from '../../services/categoryService';
+import { useAuth } from '../../context/AuthContext';
+import accountService from '../../services/accountService';
+import recurringTransactionService from '../../services/recurringTransactionService';
 
 
 const { width, height } = Dimensions.get('window');
@@ -35,12 +40,13 @@ const DetailedAddTransactionModal = ({
   type = 'expense', 
   onTransactionAdded 
 }) => {
+  const { user } = useAuth();
   // State variables
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedCategories, setSelectedCategories] = useState([]);
-  const [selectedAccount, setSelectedAccount] = useState(testUser.accounts[0]);
+  const [selectedAccount, setSelectedAccount] = useState(null);
   const [date, setDate] = useState(new Date());
   const [time, setTime] = useState(new Date());
   const [notes, setNotes] = useState('');
@@ -82,9 +88,61 @@ const DetailedAddTransactionModal = ({
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
   const slideAnim = useRef(new Animated.Value(height)).current;
 
-  const categories = type === 'income' ? testUser.categories.income : testUser.categories.expense;
+  // Kategorileri Supabase'den al
+  const [categories, setCategories] = useState([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
   const platformCategories = categories.filter(cat => cat.isPlatform);
   const regularCategories = categories.filter(cat => !cat.isPlatform);
+  
+  // Kategorileri yükle
+  const loadCategories = async () => {
+    if (!user) return;
+    
+    try {
+      setLoadingCategories(true);
+      const result = await categoryService.getCategories(user.id);
+      
+      if (result.success) {
+        setCategories(result.data || []);
+      } else {
+        console.error('Load categories error:', result.error);
+        setCategories([]);
+      }
+    } catch (error) {
+      console.error('Error loading categories:', error);
+      setCategories([]);
+    } finally {
+      setLoadingCategories(false);
+    }
+  };
+  
+  // Hesapları state'de tut
+  const [accounts, setAccounts] = useState([]);
+  
+  // Hesapları yükle
+  const loadAccounts = async () => {
+    if (!user) return;
+    
+    try {
+      const result = await accountService.getAccounts(user.id);
+      
+      if (result.success) {
+        const accountsData = result.data || [];
+        setAccounts(accountsData);
+        
+        // İlk hesabı otomatik seç (eğer henüz seçilmemişse)
+        if (accountsData.length > 0 && !selectedAccount) {
+          setSelectedAccount(accountsData[0]);
+        }
+      } else {
+        console.error('Load accounts error:', result.error);
+        setAccounts([]);
+      }
+    } catch (error) {
+      console.error('Error loading accounts:', error);
+      setAccounts([]);
+    }
+  };
   
   // Arama filtresi ile kategorileri filtrele
   const filteredCategories = categories.filter(cat => 
@@ -132,6 +190,11 @@ const DetailedAddTransactionModal = ({
           useNativeDriver: true,
         }),
       ]).start();
+      
+      // Kategorileri yükle
+      loadCategories();
+      // Hesapları yükle
+      loadAccounts();
     } else {
       // Modal kapandığında animasyon
       Animated.parallel([
@@ -181,35 +244,84 @@ const DetailedAddTransactionModal = ({
     handleClose();
   };
 
-  const handleSaveTransaction = () => {
-    if (!amount || !selectedCategory) {
+  const handleSaveTransaction = async () => {
+    if (!amount || !selectedCategory || !user) {
       Alert.alert('Hata', 'Lütfen miktar ve kategori seçin.');
       return;
     }
+    
+    // Eğer hesap seçilmemişse, ilk hesabı kullan
+    if (!selectedAccount && accounts.length > 0) {
+      setSelectedAccount(accounts[0]);
+    }
+    
+    if (!selectedAccount) {
+      Alert.alert('Hata', 'Hesap bulunamadı. Lütfen tekrar deneyin.');
+      return;
+    }
 
-    const transaction = {
-      id: Date.now().toString(),
-      type,
-      amount: parseFloat(amount.replace(/\./g, '').replace(',', '.')),
-      description: description || selectedCategory.name,
-      category: selectedCategory,
-      account: selectedAccount,
-      date: date.toISOString(),
-      notes,
-      isRecurring,
-      recurringFrequency: isRecurring ? recurringFrequency : null,
-      createdAt: new Date().toISOString(),
-    };
+    try {
+      const transactionData = {
+        user_id: user.id,
+        type,
+        amount: parseFloat(amount.replace(/\./g, '').replace(',', '.')),
+        description: description || selectedCategory.name,
+        category_id: selectedCategory.id,
+        account_id: selectedAccount.id,
+        date: date.toISOString(),
+        notes,
+        is_recurring: isRecurring,
+        recurring_frequency: isRecurring ? recurringFrequency : null,
+        created_at: new Date().toISOString(),
+      };
 
-    // Transaction added successfully
-    Alert.alert('Başarılı', `${type === 'income' ? 'Gelir' : 'Gider'} başarıyla eklendi.`);
-    handleClose();
+      let result;
+      
+      // Eğer recurring transaction ise
+      if (isRecurring) {
+        const recurringData = {
+          ...transactionData,
+          start_date: date.toISOString().split('T')[0],
+          frequency: recurringFrequency
+        };
+        
+        result = await recurringTransactionService.createRecurringTransaction(recurringData);
+      } else {
+        // Normal transaction
+        result = await transactionService.createTransaction(transactionData);
+      }
+      
+      if (result.success) {
+        const message = isRecurring 
+          ? `${type === 'income' ? 'Sabit gelir' : 'Sabit gider'} başarıyla eklendi!`
+          : `${type === 'income' ? 'Gelir' : 'Gider'} başarıyla eklendi.`;
+          
+        Alert.alert('Başarılı', message);
+        
+        // Callback'i çağır ve verileri güncelle
+        if (onTransactionAdded) {
+          onTransactionAdded(result.data);
+        }
+        
+        // Hesapları ve kategorileri yeniden yükle
+        await loadAccounts();
+        await loadCategories();
+        
+        handleClose();
+      } else {
+        Alert.alert('Hata', 'İşlem eklenirken bir hata oluştu: ' + result.error?.message);
+      }
+    } catch (error) {
+      console.error('Transaction save error:', error);
+      Alert.alert('Hata', 'İşlem eklenirken bir hata oluştu.');
+    }
   };
 
   const handleClose = () => {
     setAmount('');
     setDescription('');
     setSelectedCategory(null);
+    setSelectedAccount(null);
     setDate(new Date());
     setTime(new Date());
     setNotes('');
@@ -225,33 +337,73 @@ const DetailedAddTransactionModal = ({
     }
   };
 
-  const handleAddCustomCategory = () => {
-    if (!customCategoryName.trim()) {
+  const handleAddAccount = async () => {
+    if (!user) {
+      Alert.alert('Hata', 'Kullanıcı bilgisi bulunamadı.');
+      return;
+    }
+
+    try {
+      const accountData = {
+        user_id: user.id,
+        name: 'Ana Hesap',
+        type: 'bank',
+        balance: 0.00,
+        currency: 'TRY',
+        is_active: true
+      };
+
+      const result = await accountService.createAccount(accountData);
+      
+      if (result.success) {
+        Alert.alert('Başarılı', 'Ana hesap oluşturuldu!');
+        // Hesapları yeniden yükle
+        loadAccounts();
+      } else {
+        Alert.alert('Hata', 'Hesap oluşturulurken bir hata oluştu: ' + result.error?.message);
+      }
+    } catch (error) {
+      console.error('Account creation error:', error);
+      Alert.alert('Hata', 'Hesap oluşturulurken bir hata oluştu.');
+    }
+  };
+
+  const handleAddCustomCategory = async () => {
+    if (!customCategoryName.trim() || !user) {
       Alert.alert('Hata', 'Lütfen kategori adını girin.');
       return;
     }
 
-    const newCategory = {
-      id: Date.now().toString(),
-      name: customCategoryName,
-      icon: customCategoryIcon,
-      color: customCategoryColor,
-      isCustom: true,
-    };
+    try {
+      const categoryData = {
+        name: customCategoryName,
+        icon: customCategoryIcon,
+        color: customCategoryColor,
+        user_id: user.id,
+        is_custom: true,
+        type: type === 'income' ? 'income' : 'expense'
+      };
 
-    if (type === 'income') {
-      testUser.incomeCategories.push(newCategory);
-    } else {
-      testUser.expenseCategories.push(newCategory);
+      const result = await categoryService.createCategory(categoryData);
+      
+      if (result.success) {
+        setSelectedCategory(result.data);
+        setCustomCategoryName('');
+        setCustomCategoryIcon('category');
+        setCustomCategoryColor('#6C63FF');
+        setShowCustomCategoryForm(false);
+        setShowCategoryModal(false);
+        Alert.alert('Başarılı', 'Yeni kategori eklendi.');
+        
+        // Kategorileri yeniden yükle
+        loadCategories();
+      } else {
+        Alert.alert('Hata', 'Kategori eklenirken bir hata oluştu: ' + result.error?.message);
+      }
+    } catch (error) {
+      console.error('Category creation error:', error);
+      Alert.alert('Hata', 'Kategori eklenirken bir hata oluştu.');
     }
-
-    setSelectedCategory(newCategory);
-    setCustomCategoryName('');
-    setCustomCategoryIcon('category');
-    setCustomCategoryColor('#6C63FF');
-    setShowCustomCategoryForm(false);
-    setShowCategoryModal(false);
-    Alert.alert('Başarılı', 'Yeni kategori eklendi.');
   };
 
   const renderQuickAmount = (quickAmount) => (
@@ -787,31 +939,47 @@ const DetailedAddTransactionModal = ({
               {/* Account Section */}
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Hesap</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.accountScroll}>
-                  {testUser.accounts.map(account => (
+                {accounts.length > 0 ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.accountScroll}>
+                    {accounts.map(account => (
+                      <TouchableOpacity
+                        key={account.id}
+                        style={[
+                          styles.accountOption,
+                          selectedAccount?.id === account.id && styles.accountOptionSelected
+                        ]}
+                        onPress={() => setSelectedAccount(account)}
+                      >
+                        <Text style={[
+                          styles.accountOptionText,
+                          selectedAccount?.id === account.id && styles.accountOptionTextSelected
+                        ]}>
+                          {account.name}
+                        </Text>
+                        <Text style={[
+                          styles.accountBalance,
+                          selectedAccount?.id === account.id && styles.accountBalanceSelected
+                        ]}>
+                          {formatCurrency(account.balance)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                ) : (
+                  <View style={styles.noAccountsContainer}>
+                    <MaterialIcons name="account-balance" size={24} color={theme.colors.textSecondary} />
+                    <Text style={styles.noAccountsText}>Hesap bulunamadı</Text>
+                    <Text style={styles.noAccountsSubtext}>Yeni hesap ekleyin</Text>
+                    
                     <TouchableOpacity
-                      key={account.id}
-                      style={[
-                        styles.accountOption,
-                        selectedAccount.id === account.id && styles.accountOptionSelected
-                      ]}
-                      onPress={() => setSelectedAccount(account)}
+                      style={styles.addAccountButton}
+                      onPress={handleAddAccount}
                     >
-                      <Text style={[
-                        styles.accountOptionText,
-                        selectedAccount.id === account.id && styles.accountOptionTextSelected
-                      ]}>
-                        {account.name}
-                      </Text>
-                      <Text style={[
-                        styles.accountBalance,
-                        selectedAccount.id === account.id && styles.accountBalanceSelected
-                      ]}>
-                        {formatCurrency(account.balance)}
-                      </Text>
+                      <MaterialIcons name="add" size={20} color="#FFFFFF" />
+                      <Text style={styles.addAccountButtonText}>Hesap Ekle</Text>
                     </TouchableOpacity>
-                  ))}
-                </ScrollView>
+                  </View>
+                )}
               </View>
 
               {/* Date Section */}
@@ -1944,6 +2112,54 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     marginLeft: theme.spacing.sm,
     paddingVertical: theme.spacing.xs,
+  },
+
+  // No Accounts Styles
+  noAccountsContainer: {
+    alignItems: 'center',
+    padding: theme.spacing.lg,
+    backgroundColor: theme.colors.cards,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderStyle: 'dashed',
+  },
+
+  noAccountsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.sm,
+    marginBottom: theme.spacing.xs,
+  },
+
+  noAccountsSubtext: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+
+  addAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.primary,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    marginTop: theme.spacing.md,
+    elevation: 2,
+    shadowColor: theme.colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+
+  addAccountButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginLeft: theme.spacing.xs,
   },
 });
 

@@ -1,5 +1,6 @@
 // FinanceFlow - Theme System
 // Renk paleti ve design tokens
+import responsive from './responsive';
 
 export const theme = {
   colors: {
@@ -27,75 +28,110 @@ export const theme = {
     backgroundGradient: ['#6C63FF', '#4ECDC4'],
   },
   
+
+  
+  // Responsive layout
+  layout: {
+    headerHeight: responsive.responsiveLayout.headerHeight,
+    tabBarHeight: responsive.responsiveLayout.tabBarHeight,
+    contentPadding: responsive.responsiveLayout.contentPadding,
+    sectionSpacing: responsive.responsiveLayout.sectionSpacing,
+    safeAreaTop: responsive.responsiveLayout.safeAreaTop,
+    safeAreaBottom: responsive.responsiveLayout.safeAreaBottom,
+  },
+  
+  // Responsive grid
+  grid: {
+    columns: responsive.responsiveGrid.columns,
+    gap: responsive.responsiveGrid.gap,
+    getItemWidth: responsive.responsiveGrid.itemWidth,
+  },
+  
+  // Responsive animations
+  animations: {
+    duration: responsive.responsiveAnimations.duration,
+    easing: responsive.responsiveAnimations.easing,
+  },
+  
+  // Screen dimensions
+  screen: {
+    width: responsive.screenDimensions.width,
+    height: responsive.screenDimensions.height,
+    isSmall: responsive.screenDimensions.isSmall,
+    isMedium: responsive.screenDimensions.isMedium,
+    isLarge: responsive.screenDimensions.isLarge,
+    isTablet: responsive.screenDimensions.isTablet,
+  },
+  
   spacing: {
-    xs: 4,
-    sm: 8,
-    md: 16,
-    lg: 24,
-    xl: 32,
-    xxl: 48,
+    xs: responsive.responsiveSpacing.xs,
+    sm: responsive.responsiveSpacing.sm,
+    md: responsive.responsiveSpacing.md,
+    lg: responsive.responsiveSpacing.lg,
+    xl: responsive.responsiveSpacing.xl,
+    xxl: responsive.responsiveSpacing.xxl,
   },
   
   borderRadius: {
-    sm: 8,
-    md: 12,
-    lg: 16,
-    xl: 24,
+    sm: responsive.responsiveDimensions.borderRadius.sm,
+    md: responsive.responsiveDimensions.borderRadius.md,
+    lg: responsive.responsiveDimensions.borderRadius.lg,
+    xl: responsive.responsiveDimensions.borderRadius.xl,
     full: 999,
   },
   
   typography: {
     // Headers - Inter Bold/SemiBold
     h1: {
-      fontSize: 32,
+      fontSize: responsive.responsiveFontSize.largeTitle,
       fontWeight: '700',
-      lineHeight: 40,
+      lineHeight: responsive.verticalScale(40),
     },
     h2: {
-      fontSize: 24,
+      fontSize: responsive.responsiveFontSize.title,
       fontWeight: '600',
-      lineHeight: 32,
+      lineHeight: responsive.verticalScale(32),
     },
     h3: {
-      fontSize: 20,
+      fontSize: responsive.responsiveFontSize.xl,
       fontWeight: '600',
-      lineHeight: 28,
+      lineHeight: responsive.verticalScale(28),
     },
     h4: {
-      fontSize: 18,
+      fontSize: responsive.responsiveFontSize.lg,
       fontWeight: '600',
-      lineHeight: 24,
+      lineHeight: responsive.verticalScale(24),
     },
     
     // Body - Inter Regular/Medium
     bodyLarge: {
-      fontSize: 16,
+      fontSize: responsive.responsiveFontSize.md,
       fontWeight: '400',
-      lineHeight: 24,
+      lineHeight: responsive.verticalScale(24),
     },
     bodyMedium: {
-      fontSize: 14,
+      fontSize: responsive.responsiveFontSize.sm,
       fontWeight: '400',
-      lineHeight: 20,
+      lineHeight: responsive.verticalScale(20),
     },
     bodySmall: {
-      fontSize: 12,
+      fontSize: responsive.responsiveFontSize.xs,
       fontWeight: '400',
-      lineHeight: 16,
+      lineHeight: responsive.verticalScale(16),
     },
     
     // Numbers - SF Mono (para miktarları için)
     currency: {
-      fontSize: 24,
+      fontSize: responsive.responsiveFontSize.xl,
       fontWeight: '600',
       fontFamily: 'monospace',
-      lineHeight: 32,
+      lineHeight: responsive.verticalScale(32),
     },
     currencyLarge: {
-      fontSize: 32,
+      fontSize: responsive.responsiveFontSize.largeTitle,
       fontWeight: '700',
       fontFamily: 'monospace',
-      lineHeight: 40,
+      lineHeight: responsive.verticalScale(40),
     },
     
     // Button text

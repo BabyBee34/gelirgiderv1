@@ -1,15 +1,13 @@
-// FinanceFlow - Budget & Goals Screen
-import React, { useState, useRef, useEffect } from 'react';
+// FinanceFlow - Budget Screen
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
   StyleSheet, 
   ScrollView, 
   TouchableOpacity, 
-  Dimensions, 
-  Animated,
-  RefreshControl,
-  Alert
+  Dimensions,
+  ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,269 +15,261 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { theme } from '../../styles/theme';
 import { testUser } from '../../utils/testData';
 import { formatCurrency } from '../../utils/formatters';
-import AddGoalModal from '../modals/AddGoalModal';
+import EmptyState from '../../components/ui/EmptyState';
 
 const { width } = Dimensions.get('window');
 
 const BudgetScreen = ({ navigation }) => {
-  const [selectedTab, setSelectedTab] = useState('goals'); // goals, budgets, insights
-  const [refreshing, setRefreshing] = useState(false);
-  const [addGoalVisible, setAddGoalVisible] = useState(false);
-  const [editingGoal, setEditingGoal] = useState(null);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [selectedMonth, setSelectedMonth] = useState('Ocak 2024');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 600,
-      useNativeDriver: true,
-    }).start();
-  }, []);
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1500);
+  const getTotalBudget = () => {
+    if (!testUser || !testUser.budgets) return 0;
+    return testUser.budgets.reduce((total, budget) => total + budget.amount, 0);
   };
 
-  const handleEditGoal = (goal) => {
-    setEditingGoal(goal);
-    setAddGoalVisible(true);
+  const getTotalSpent = () => {
+    if (!testUser || !testUser.budgets) return 0;
+    return testUser.budgets.reduce((total, budget) => total + budget.spent, 0);
   };
 
-  const handleDeleteGoal = (goalId) => {
-    Alert.alert(
-      'Hedefi Sil',
-      'Bu hedefi silmek istediğinizden emin misiniz?',
-      [
-        { text: 'İptal', style: 'cancel' },
-        { 
-          text: 'Sil', 
-          style: 'destructive',
-          onPress: () => {
-            const index = testUser.goals.findIndex(g => g.id === goalId);
-            if (index > -1) {
-              testUser.goals.splice(index, 1);
-              Alert.alert('Başarılı', 'Hedef silindi.');
-            }
-          }
-        }
-      ]
-    );
+  const getRemainingBudget = () => {
+    return getTotalBudget() - getTotalSpent();
   };
 
-  const renderTabButton = (tab, label, icon) => (
-    <TouchableOpacity
-      style={[
-        styles.tabButton,
-        selectedTab === tab && styles.tabButtonActive
-      ]}
-      onPress={() => setSelectedTab(tab)}
-    >
-      <MaterialIcons 
-        name={icon} 
-        size={20} 
-        color={selectedTab === tab ? '#FFFFFF' : theme.colors.textSecondary} 
-      />
-      <Text style={[
-        styles.tabButtonText,
-        selectedTab === tab && styles.tabButtonTextActive
-      ]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
+  const getBudgetProgress = (spent, amount) => {
+    return Math.min((spent / amount) * 100, 100);
+  };
 
-  const renderGoalCard = (goal) => {
-    const progress = (goal.currentAmount / goal.targetAmount) * 100;
-    const remainingAmount = goal.targetAmount - goal.currentAmount;
-    const daysLeft = Math.ceil((new Date(goal.targetDate) - new Date()) / (1000 * 60 * 60 * 24));
+  const renderBudgetCard = (budget) => {
+    const progress = getBudgetProgress(budget.spent, budget.amount);
+    const isOverBudget = budget.spent > budget.amount;
+    
+    const toggleShowOnHome = () => {
+      budget.showOnHome = !budget.showOnHome;
+      // Force re-render
+      setSelectedMonth(selectedMonth);
+    };
     
     return (
-      <TouchableOpacity key={goal.id} style={styles.goalCard}>
-        <View style={styles.goalHeader}>
-          <View style={styles.goalInfo}>
-            <View style={[styles.goalIcon, { backgroundColor: `${goal.color}15` }]}>
-              <MaterialIcons name={goal.icon} size={24} color={goal.color} />
+      <View key={budget.id} style={styles.budgetCard}>
+        <View style={styles.budgetHeader}>
+          <View style={styles.budgetIcon}>
+            <MaterialIcons name={budget.icon} size={24} color={budget.color} />
+          </View>
+          <View style={styles.budgetInfo}>
+            <Text style={styles.budgetCategory}>{budget.category}</Text>
+            <Text style={styles.budgetAmount}>
+              {formatCurrency(budget.spent)} / {formatCurrency(budget.amount)}
+            </Text>
+          </View>
+          <View style={styles.budgetStatus}>
+            <View style={styles.budgetStatusTop}>
+              <TouchableOpacity 
+                style={styles.showOnHomeButton}
+                onPress={toggleShowOnHome}
+              >
+                <MaterialIcons 
+                  name={budget.showOnHome ? 'visibility' : 'visibility-off'} 
+                  size={20} 
+                  color={budget.showOnHome ? '#48BB78' : '#718096'} 
+                />
+              </TouchableOpacity>
             </View>
-            <View style={styles.goalDetails}>
-              <Text style={styles.goalName}>{goal.name}</Text>
-              <Text style={styles.goalDescription}>
-                {goal.description || `${daysLeft > 0 ? `${daysLeft} gün kaldı` : 'Süre doldu'}`}
+            <View style={styles.budgetStatusBottom}>
+              <Text style={[
+                styles.budgetPercentage, 
+                { color: isOverBudget ? '#F56565' : '#48BB78' }
+              ]}>
+                {progress.toFixed(1)}%
               </Text>
             </View>
           </View>
-          <TouchableOpacity 
-            style={styles.goalMenuButton}
-            onPress={() => {
-              Alert.alert(
-                'Hedef İşlemleri',
-                goal.name,
-                [
-                  { text: 'İptal', style: 'cancel' },
-                  { text: 'Düzenle', onPress: () => handleEditGoal(goal) },
-                  { text: 'Sil', style: 'destructive', onPress: () => handleDeleteGoal(goal.id) }
-                ]
-              );
-            }}
-          >
-            <MaterialIcons name="more-vert" size={20} color={theme.colors.textSecondary} />
-          </TouchableOpacity>
         </View>
-
-        <View style={styles.goalProgress}>
-          <View style={styles.goalProgressInfo}>
-            <Text style={styles.goalProgressText}>
-              {formatCurrency(goal.currentAmount)} / {formatCurrency(goal.targetAmount)}
-            </Text>
-            <Text style={[
-              styles.goalProgressPercent,
-              { color: progress >= 100 ? theme.colors.success : goal.color }
-            ]}>
-              %{Math.round(progress)}
-            </Text>
-          </View>
-          <View style={styles.goalProgressBar}>
-            <View style={[
-              styles.goalProgressFill, 
-              { width: `${Math.min(progress, 100)}%`, backgroundColor: goal.color }
-            ]} />
-          </View>
+        
+        <View style={styles.progressBar}>
+          <View style={[
+            styles.progressFill, 
+            { 
+              width: `${progress}%`,
+              backgroundColor: isOverBudget ? '#F56565' : budget.color
+            }
+          ]} />
         </View>
-
-        <View style={styles.goalFooter}>
-          <View style={styles.goalStatItem}>
-            <Text style={styles.goalStatLabel}>Kalan</Text>
-            <Text style={[
-              styles.goalStatValue,
-              { color: remainingAmount <= 0 ? theme.colors.success : theme.colors.textPrimary }
-            ]}>
-              {remainingAmount <= 0 ? 'Tamamlandı!' : formatCurrency(remainingAmount)}
+        
+        <View style={styles.budgetFooter}>
+          <Text style={styles.budgetRemaining}>
+            Kalan: {formatCurrency(budget.amount - budget.spent)}
+          </Text>
+          <Text style={styles.showOnHomeText}>
+            {budget.showOnHome ? 'Anasayfada Gösteriliyor' : 'Anasayfada Gizli'}
+          </Text>
+          {isOverBudget && (
+            <Text style={styles.overBudgetText}>
+              Bütçe aşıldı! +{formatCurrency(budget.spent - budget.amount)}
             </Text>
-          </View>
-          <View style={styles.goalStatItem}>
-            <Text style={styles.goalStatLabel}>Hedef Tarih</Text>
-            <Text style={styles.goalStatValue}>
-              {new Date(goal.targetDate).toLocaleDateString('tr-TR', { 
-                day: '2-digit', 
-                month: 'short' 
-              })}
-            </Text>
-          </View>
+          )}
         </View>
-      </TouchableOpacity>
+      </View>
     );
   };
 
-  const renderGoalsTab = () => (
-    <View>
-      {/* Goals Summary */}
-      <LinearGradient
-        colors={[theme.colors.primary, theme.colors.secondary]}
-        style={styles.summaryCard}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      >
-        <MaterialIcons name="flag" size={32} color="#FFFFFF" />
-        <Text style={styles.summaryTitle}>Hedeflerim</Text>
-        <Text style={styles.summaryAmount}>
-          {testUser.goals.length} aktif hedef
-        </Text>
-        <Text style={styles.summarySubtitle}>
-          Toplam hedef: {formatCurrency(testUser.goals.reduce((sum, goal) => sum + goal.targetAmount, 0))}
-        </Text>
-      </LinearGradient>
-
-      {/* Add Goal Button */}
-      <TouchableOpacity 
-        style={styles.addButton}
-        onPress={() => {
-          setEditingGoal(null);
-          setAddGoalVisible(true);
-        }}
-      >
-        <MaterialIcons name="add" size={24} color="#FFFFFF" />
-        <Text style={styles.addButtonText}>Yeni Hedef Ekle</Text>
-      </TouchableOpacity>
-
-      {/* Goals List */}
-      <View style={styles.goalsList}>
-        {testUser.goals.length > 0 ? (
-          testUser.goals.map(renderGoalCard)
-        ) : (
-          <View style={styles.emptyState}>
-            <MaterialIcons name="flag" size={64} color={theme.colors.textSecondary} />
-            <Text style={styles.emptyTitle}>Henüz hedef yok</Text>
-            <Text style={styles.emptySubtitle}>
-              İlk hedefinizi ekleyerek başlayın
+  const renderGoalCard = (goal) => {
+    const progress = (goal.currentAmount / goal.targetAmount) * 100;
+    
+    const toggleShowOnHome = () => {
+      goal.showOnHome = !goal.showOnHome;
+      // Force re-render
+      setSelectedMonth(selectedMonth);
+    };
+    
+    return (
+      <View key={goal.id} style={styles.goalCard}>
+        <LinearGradient
+          colors={[goal.color, `${goal.color}80`]}
+          style={styles.goalGradient}
+        >
+          <View style={styles.goalHeader}>
+            <MaterialIcons name={goal.icon} size={32} color="#fff" />
+            <Text style={styles.goalTitle}>{goal.name}</Text>
+            <TouchableOpacity 
+              style={styles.showOnHomeButton}
+              onPress={toggleShowOnHome}
+            >
+              <MaterialIcons 
+                name={goal.showOnHome ? 'visibility' : 'visibility-off'} 
+                size={20} 
+                color="#fff" 
+              />
+            </TouchableOpacity>
+          </View>
+          
+          <Text style={styles.goalAmount}>
+            {formatCurrency(goal.currentAmount)} / {formatCurrency(goal.targetAmount)}
+          </Text>
+          
+          <View style={styles.goalProgress}>
+            <View style={styles.goalProgressBar}>
+              <View style={[styles.goalProgressFill, { width: `${progress}%` }]} />
+            </View>
+            <Text style={styles.goalPercentage}>{progress.toFixed(1)}%</Text>
+          </View>
+          
+          <Text style={styles.goalDeadline}>
+            Hedef Tarih: {goal.deadline}
+          </Text>
+          
+          <View style={styles.goalFooter}>
+            <Text style={styles.showOnHomeText}>
+              {goal.showOnHome ? 'Anasayfada Gösteriliyor' : 'Anasayfada Gizli'}
             </Text>
           </View>
-        )}
+        </LinearGradient>
       </View>
-    </View>
-  );
-
-  const renderBudgetsTab = () => (
-    <View style={styles.comingSoon}>
-      <MaterialIcons name="account-balance-wallet" size={64} color={theme.colors.textSecondary} />
-      <Text style={styles.comingSoonTitle}>Bütçe Yönetimi</Text>
-      <Text style={styles.comingSoonSubtitle}>
-        Kategori bazlı bütçe belirleme ve takip özellikleri yakında!
-      </Text>
-    </View>
-  );
-
-  const renderInsightsTab = () => (
-    <View style={styles.comingSoon}>
-      <MaterialIcons name="insights" size={64} color={theme.colors.textSecondary} />
-      <Text style={styles.comingSoonTitle}>Akıllı Öneriler</Text>
-      <Text style={styles.comingSoonSubtitle}>
-        Harcama alışkanlıklarınıza göre tasarruf önerileri yakında!
-      </Text>
-    </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <MaterialIcons name="arrow-back" size={24} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Bütçe & Hedefler</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <MaterialIcons name="arrow-back" size={24} color={theme.colors.textPrimary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Bütçe & Hedefler</Text>
+          <TouchableOpacity>
+            <MaterialIcons name="add" size={24} color={theme.colors.primary} />
+          </TouchableOpacity>
+        </View>
 
-      {/* Tab Navigation */}
-      <View style={styles.tabContainer}>
-        {renderTabButton('goals', 'Hedefler', 'flag')}
-        {renderTabButton('budgets', 'Bütçe', 'account-balance-wallet')}
-        {renderTabButton('insights', 'Öneriler', 'insights')}
-      </View>
+        {/* Budget Overview */}
+        <View style={styles.budgetOverview}>
+          <LinearGradient
+            colors={[theme.colors.primary, theme.colors.secondary]}
+            style={styles.overviewCard}
+          >
+            <Text style={styles.overviewTitle}>Aylık Bütçe Özeti</Text>
+            <View style={styles.overviewStats}>
+              <View style={styles.overviewStat}>
+                <Text style={styles.overviewLabel}>Toplam Bütçe</Text>
+                <Text style={styles.overviewValue}>{formatCurrency(getTotalBudget())}</Text>
+              </View>
+              <View style={styles.overviewStat}>
+                <Text style={styles.overviewLabel}>Harcanan</Text>
+                <Text style={styles.overviewValue}>{formatCurrency(getTotalSpent())}</Text>
+              </View>
+              <View style={styles.overviewStat}>
+                <Text style={styles.overviewLabel}>Kalan</Text>
+                <Text style={[
+                  styles.overviewValue,
+                  { color: getRemainingBudget() < 0 ? '#F56565' : '#48BB78' }
+                ]}>
+                  {formatCurrency(getRemainingBudget())}
+                </Text>
+              </View>
+            </View>
+          </LinearGradient>
+        </View>
 
-      {/* Content */}
-      <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
-        <ScrollView 
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-        >
-          {selectedTab === 'goals' && renderGoalsTab()}
-          {selectedTab === 'budgets' && renderBudgetsTab()}
-          {selectedTab === 'insights' && renderInsightsTab()}
-          <View style={styles.bottomPadding} />
-        </ScrollView>
-      </Animated.View>
+        {/* Loading State */}
+        {loading && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={styles.loadingText}>Bütçe verileri yükleniyor...</Text>
+          </View>
+        )}
 
-      {/* Add Goal Modal */}
-      <AddGoalModal
-        visible={addGoalVisible}
-        onClose={() => {
-          setAddGoalVisible(false);
-          setEditingGoal(null);
-        }}
-        goal={editingGoal}
-      />
+        {/* Error State */}
+        {error && !loading && (
+          <View style={styles.errorContainer}>
+            <MaterialIcons name="error" size={64} color={theme.colors.error} />
+            <Text style={styles.errorTitle}>Hata Oluştu</Text>
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={() => {
+              setError(null);
+              // TODO: Implement retry logic
+            }}>
+              <Text style={styles.retryButtonText}>Tekrar Dene</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Budget Categories */}
+        {!loading && !error && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Bütçe Kategorileri</Text>
+            {testUser.budgets && testUser.budgets.length > 0 ? (
+              testUser.budgets.map(renderBudgetCard)
+            ) : (
+              <EmptyState
+                type="budgets"
+                onAction={() => navigation.navigate('Transactions')}
+                size="medium"
+              />
+            )}
+          </View>
+        )}
+
+        {/* Financial Goals */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Finansal Hedefler</Text>
+          {testUser.goals && testUser.goals.length > 0 ? (
+            <View style={styles.goalsGrid}>
+              {testUser.goals.map(renderGoalCard)}
+            </View>
+          ) : (
+            <EmptyState
+              type="goals"
+              onAction={() => navigation.navigate('Transactions')}
+              size="medium"
+            />
+          )}
+        </View>
+
+        <View style={styles.bottomPadding} />
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -287,278 +277,333 @@ const BudgetScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: '#F8FAFC',
   },
 
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.md,
   },
 
   headerTitle: {
     fontSize: 20,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-  },
-
-  tabContainer: {
-    flexDirection: 'row',
-    backgroundColor: theme.colors.cards,
-    marginHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.lg,
-    borderRadius: theme.borderRadius.md,
-    padding: 4,
-    elevation: 2,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-
-  tabButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.borderRadius.sm,
-  },
-
-  tabButtonActive: {
-    backgroundColor: theme.colors.primary,
-  },
-
-  tabButtonText: {
-    fontSize: 12,
-    color: theme.colors.textSecondary,
     fontWeight: '600',
-    marginLeft: theme.spacing.xs,
+    color: theme.colors.textPrimary,
   },
 
-  tabButtonTextActive: {
-    color: '#FFFFFF',
-  },
-
-  content: {
-    flex: 1,
-  },
-
-  summaryCard: {
+  budgetOverview: {
     marginHorizontal: theme.spacing.lg,
     marginBottom: theme.spacing.lg,
-    padding: theme.spacing.xl,
+  },
+
+  overviewCard: {
+    padding: theme.spacing.lg,
     borderRadius: theme.borderRadius.lg,
-    alignItems: 'center',
     elevation: 4,
-    shadowColor: '#000000',
+    shadowColor: theme.colors.primary,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
   },
 
-  summaryTitle: {
-    fontSize: 16,
-    color: '#FFFFFF',
+  overviewTitle: {
+    fontSize: 18,
     fontWeight: '600',
-    marginTop: theme.spacing.sm,
-    marginBottom: theme.spacing.xs,
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: theme.spacing.lg,
   },
 
-  summaryAmount: {
-    fontSize: 24,
-    color: '#FFFFFF',
-    fontWeight: '800',
-    marginBottom: theme.spacing.xs,
+  overviewStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
 
-  summarySubtitle: {
+  overviewStat: {
+    alignItems: 'center',
+    flex: 1,
+  },
+
+  overviewLabel: {
     fontSize: 14,
     color: 'rgba(255,255,255,0.8)',
+    marginBottom: theme.spacing.xs,
   },
 
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.colors.primary,
+  overviewValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+
+  section: {
     marginHorizontal: theme.spacing.lg,
     marginBottom: theme.spacing.lg,
-    padding: theme.spacing.lg,
-    borderRadius: theme.borderRadius.md,
-    elevation: 2,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
   },
 
-  addButtonText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    fontWeight: '600',
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1A202C',
+    marginBottom: theme.spacing.md,
     marginLeft: theme.spacing.sm,
   },
 
-  goalsList: {
-    paddingHorizontal: theme.spacing.lg,
-  },
-
-  goalCard: {
-    backgroundColor: theme.colors.cards,
-    borderRadius: theme.borderRadius.lg,
+  budgetCard: {
+    backgroundColor: '#FFFFFF',
     padding: theme.spacing.lg,
-    marginBottom: theme.spacing.lg,
+    borderRadius: theme.borderRadius.lg,
+    marginBottom: theme.spacing.md,
     elevation: 2,
-    shadowColor: '#000000',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
   },
 
-  goalHeader: {
+  budgetHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: theme.spacing.md,
   },
 
-  goalInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-
-  goalIcon: {
+  budgetIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    justifyContent: 'center',
+    backgroundColor: '#F7FAFC',
     alignItems: 'center',
+    justifyContent: 'center',
     marginRight: theme.spacing.md,
   },
 
-  goalDetails: {
+  budgetInfo: {
     flex: 1,
   },
 
-  goalName: {
-    fontSize: 18,
+  budgetCategory: {
+    fontSize: 16,
+    fontWeight: '600',
     color: theme.colors.textPrimary,
-    fontWeight: '700',
     marginBottom: 2,
   },
 
-  goalDescription: {
-    fontSize: 12,
+  budgetAmount: {
+    fontSize: 14,
     color: theme.colors.textSecondary,
   },
 
-  goalMenuButton: {
-    padding: theme.spacing.sm,
+  budgetStatus: {
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    height: 60,
+  },
+
+  budgetStatusTop: {
+    alignItems: 'center',
+    marginBottom: theme.spacing.xs,
+  },
+
+  budgetStatusBottom: {
+    alignItems: 'center',
+  },
+
+  budgetPercentage: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  progressBar: {
+    height: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    marginBottom: theme.spacing.md,
+    overflow: 'hidden',
+  },
+
+  progressFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+
+  budgetFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  budgetRemaining: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+  },
+
+  overBudgetText: {
+    fontSize: 14,
+    color: '#F56565',
+    fontWeight: '500',
+  },
+
+  showOnHomeButton: {
+    padding: theme.spacing.xs,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  showOnHomeText: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    fontStyle: 'italic',
+  },
+
+  goalsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing.md,
+  },
+
+  goalCard: {
+    width: (width - theme.spacing.lg * 3) / 2,
+    borderRadius: theme.borderRadius.lg,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    overflow: 'hidden',
+  },
+
+  goalGradient: {
+    padding: theme.spacing.lg,
+    minHeight: 160,
+  },
+
+  goalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+  },
+
+  goalTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginLeft: theme.spacing.sm,
+    flex: 1,
+  },
+
+  goalAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: theme.spacing.md,
   },
 
   goalProgress: {
     marginBottom: theme.spacing.md,
   },
 
-  goalProgressInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing.sm,
-  },
-
-  goalProgressText: {
-    fontSize: 14,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-  },
-
-  goalProgressPercent: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-
   goalProgressBar: {
-    height: 8,
-    backgroundColor: '#E2E8F0',
-    borderRadius: 4,
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 3,
+    marginBottom: theme.spacing.xs,
     overflow: 'hidden',
   },
 
   goalProgressFill: {
     height: '100%',
-    borderRadius: 4,
+    backgroundColor: '#fff',
+    borderRadius: 3,
+  },
+
+  goalPercentage: {
+    fontSize: 14,
+    color: '#fff',
+    textAlign: 'right',
+  },
+
+  goalDeadline: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+  },
+
+  showOnHomeButton: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 15,
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   goalFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-
-  goalStatItem: {
+    marginTop: theme.spacing.sm,
     alignItems: 'center',
   },
 
-  goalStatLabel: {
-    fontSize: 12,
-    color: theme.colors.textSecondary,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-
-  goalStatValue: {
-    fontSize: 14,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-  },
-
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: theme.spacing.xxl * 2,
-  },
-
-  emptyTitle: {
-    fontSize: 20,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-    marginTop: theme.spacing.lg,
-    marginBottom: theme.spacing.sm,
-  },
-
-  emptySubtitle: {
-    fontSize: 14,
-    color: theme.colors.textSecondary,
+  showOnHomeText: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.8)',
     textAlign: 'center',
-  },
-
-  comingSoon: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.spacing.xxl * 2,
-    paddingHorizontal: theme.spacing.xl,
-  },
-
-  comingSoonTitle: {
-    fontSize: 20,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-    marginTop: theme.spacing.lg,
-    marginBottom: theme.spacing.sm,
-  },
-
-  comingSoonSubtitle: {
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 20,
   },
 
   bottomPadding: {
-    height: 80,
+    height: 100,
+  },
+
+  // Loading and error styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.md,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.xl,
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+    marginTop: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.lg,
+  },
+  retryButton: {
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

@@ -7,21 +7,37 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { theme } from '../../styles/theme';
 import { globalStyles } from '../../styles/globalStyles';
 import CustomCard from '../../components/ui/CustomCard';
-import { testUser } from '../../utils/testData';
 import { goldCurrencyData, goldCurrencyFunctions } from '../../utils/goldCurrencyData';
 import { formatCurrency } from '../../utils/formatters';
 import DetailedAddTransactionModal from '../modals/DetailedAddTransactionModal';
 import ReceiptScannerModal from '../modals/ReceiptScannerModal';
 import { transactionStorage } from '../../utils/storage';
 import { LoadingScreen, EmptyState } from '../../components/ui/LoadingScreen';
+import transactionService from '../../services/transactionService';
+import accountService from '../../services/accountService';
+import categoryService from '../../services/categoryService';
+import { useAuth } from '../../context/AuthContext';
+import { 
+  AccessibleButton, 
+  AccessibleCard, 
+  AccessibleText, 
+  AccessibleIcon,
+  createAccessibilityLabel,
+  createAccessibilityHint 
+} from '../../components/ui/AccessibilityWrapper';
+import { testSupabaseConnection, testAllConnections } from '../../config/supabase';
+import goalService from '../../services/goalService';
+import budgetService from '../../services/budgetService';
+import recurringTransactionService from '../../services/recurringTransactionService';
 
 const { width, height } = Dimensions.get('window');
 // Kart genişliği - tam ekran genişlik
-const CARD_WIDTH = width; // Tam ekran genişlik
-const CARD_GAP = 0; // Kartlar arası boşluk yok
-const TOTAL_CARD_WIDTH = CARD_WIDTH;
+const CARD_WIDTH = theme.screen.isSmall ? width - 32 : theme.screen.isMedium ? width - 40 : width - 48;
+const CARD_GAP = theme.spacing.md;
+const TOTAL_CARD_WIDTH = CARD_WIDTH + CARD_GAP;
 
 const HomeScreen = ({ navigation }) => {
+  const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [showBalance, setShowBalance] = useState(true);
   const [showAssets, setShowAssets] = useState(true);
@@ -31,6 +47,7 @@ const HomeScreen = ({ navigation }) => {
   const [fabMenuVisible, setFabMenuVisible] = useState(false);
   const [balanceSettingsVisible, setBalanceSettingsVisible] = useState(false);
   const [assetsSettingsVisible, setAssetsSettingsVisible] = useState(false);
+  
   // Toplam Bakiye için ayarlar
   const [includeCashAccounts, setIncludeCashAccounts] = useState(true);
   const [includeSavings, setIncludeSavings] = useState(true);
@@ -42,28 +59,53 @@ const HomeScreen = ({ navigation }) => {
   const [assetsIncludeSavings, setAssetsIncludeSavings] = useState(true);
   const [assetsIncludeCreditAvailable, setAssetsIncludeCreditAvailable] = useState(false);
   const [assetsIncludeGoldCurrency, setAssetsIncludeGoldCurrency] = useState(false);
+  
   const [transactions, setTransactions] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [categories, setCategories] = useState({ income: [], expense: [] });
+  const [goals, setGoals] = useState([]);
+  const [budgets, setBudgets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
   const horizontalScrollRef = useRef(null);
 
-  const getCashAccountsTotal = () => testUser.accounts
-    .filter(a => a.type === 'debit' || a.type === 'checking')
-    .reduce((sum, a) => sum + (a.balance || 0), 0);
+  // Gerçek Supabase verilerini kullan
+  const [userData, setUserData] = useState(null);
 
-  const getSavingsTotal = () => testUser.accounts
-    .filter(a => a.type === 'savings')
-    .reduce((sum, a) => sum + (a.balance || 0), 0);
+  const getCashAccountsTotal = () => {
+    if (!accounts || accounts.length === 0) return 0;
+    return accounts
+      .filter(a => a.type === 'bank' || a.type === 'cash')
+      .reduce((sum, a) => sum + (parseFloat(a.balance) || 0), 0);
+  };
 
-  const getCreditAvailableTotal = () => testUser.accounts
-    .filter(a => a.type === 'credit' && typeof a.availableCredit === 'number')
-    .reduce((sum, a) => sum + a.availableCredit, 0);
+  const getSavingsTotal = () => {
+    if (!accounts || accounts.length === 0) return 0;
+    return accounts
+      .filter(a => a.type === 'investment')
+      .reduce((sum, a) => sum + (parseFloat(a.balance) || 0), 0);
+  };
 
-  const getGoldCurrencyTotalTRY = () => goldCurrencyFunctions.getTotalGoldValue();
+  const getCreditAvailableTotal = () => {
+    if (!accounts || accounts.length === 0) return 0;
+    return accounts
+      .filter(a => a.type === 'credit_card' && typeof a.credit_limit === 'number')
+      .reduce((sum, a) => sum + (parseFloat(a.credit_limit) || 0), 0);
+  };
+
+  const getGoldCurrencyTotalTRY = () => {
+    if (!goldCurrencyFunctions || typeof goldCurrencyFunctions.getTotalGoldValue !== 'function') {
+      return 0;
+    }
+    return goldCurrencyFunctions.getTotalGoldValue();
+  };
 
   useEffect(() => {
-    loadTransactions();
+    if (user) {
+      loadAllData();
+    }
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -76,27 +118,168 @@ const HomeScreen = ({ navigation }) => {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [user]);
 
-  const loadTransactions = async () => {
+  // Tüm verileri yükle
+  const loadAllData = async () => {
+    if (!user) return;
+    
     try {
       setLoading(true);
-      const storedTransactions = await transactionStorage.getTransactions();
-      setTransactions(storedTransactions);
+      setError(null);
+      
+      const [transactionsResult, accountsResult, categoriesResult, recurringResult] = await Promise.all([
+        transactionService.getTransactions(user.id),
+        accountService.getAccounts(user.id),
+        categoryService.getCategories(user.id),
+        recurringTransactionService.getRecurringTransactions(user.id)
+      ]);
+
+      if (transactionsResult.success) {
+        setTransactions(transactionsResult.data || []);
+      } else {
+        console.error('Load transactions error:', transactionsResult.error);
+        setTransactions([]);
+      }
+
+      if (accountsResult.success) {
+        setAccounts(accountsResult.data || []);
+      } else {
+        console.error('Load accounts error:', accountsResult.error);
+        setAccounts([]);
+      }
+
+      if (categoriesResult.success) {
+        const incomeCats = categoriesResult.data.filter(cat => cat.type === 'income');
+        const expenseCats = categoriesResult.data.filter(cat => cat.type === 'expense');
+        setCategories({ income: incomeCats, expense: expenseCats });
+      } else {
+        console.error('Load categories error:', categoriesResult.error);
+        setCategories({ income: [], expense: [] });
+      }
+
+      // userData'yı güncelle
+      setUserData({
+        user: { 
+          firstName: user?.user_metadata?.firstName || 'Kullanıcı', 
+          lastName: user?.user_metadata?.lastName || '' 
+        },
+        accounts: accountsResult.success ? accountsResult.data : [],
+        transactions: transactionsResult.success ? transactionsResult.data : [],
+        categories: categoriesResult.success ? {
+          income: categoriesResult.data.filter(cat => cat.type === 'income'),
+          expense: categoriesResult.data.filter(cat => cat.type === 'expense')
+        } : { income: [], expense: [] },
+        goals: [],
+        budgets: [],
+        recurringTransactions: recurringResult.success ? {
+          income: recurringResult.data.filter(rt => rt.type === 'income'),
+          expense: recurringResult.data.filter(rt => rt.type === 'expense')
+        } : { income: [], expense: [] },
+        cards: []
+      });
+
     } catch (error) {
-      console.error('Error loading transactions:', error);
+      console.error('Error loading all data:', error);
+      setError('Veriler yüklenirken hata oluştu');
     } finally {
       setLoading(false);
     }
   };
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadTransactions();
-    setRefreshing(false);
+  // Ayrı ayrı veri yükleme fonksiyonları
+  const loadCategories = async () => {
+    if (!user) return;
+    
+    try {
+      const result = await categoryService.getCategories(user.id);
+      if (result.success) {
+        const incomeCats = result.data.filter(cat => cat.type === 'income');
+        const expenseCats = result.data.filter(cat => cat.type === 'expense');
+        setCategories({ income: incomeCats, expense: expenseCats });
+      } else {
+        console.error('Load categories error:', result.error);
+        setCategories({ income: [], expense: [] });
+      }
+    } catch (error) {
+      console.error('Error loading categories:', error);
+      setCategories({ income: [], expense: [] });
+    }
   };
 
+  const loadAccounts = async () => {
+    if (!user) return;
+    
+    try {
+      const result = await accountService.getAccounts(user.id);
+      if (result.success) {
+        setAccounts(result.data || []);
+      } else {
+        console.error('Load accounts error:', result.error);
+        setAccounts([]);
+      }
+    } catch (error) {
+      console.error('Error loading accounts:', error);
+      setAccounts([]);
+    }
+  };
 
+  const loadTransactions = async () => {
+    if (!user) return;
+    
+    try {
+      const result = await transactionService.getTransactions(user.id);
+      if (result.success) {
+        setTransactions(result.data || []);
+      } else {
+        console.error('Load transactions error:', result.error);
+        setTransactions([]);
+      }
+    } catch (error) {
+      console.error('Error loading transactions:', error);
+      setTransactions([]);
+    }
+  };
+
+  const loadGoals = async () => {
+    if (!user) return;
+    try {
+      const goalsResult = await goalService.getGoals(user.id);
+      if (goalsResult.success) {
+        setGoals(goalsResult.data || []);
+      } else {
+        console.error('Load goals error:', goalsResult.error);
+        setGoals([]);
+      }
+    } catch (error) {
+      console.error('Error loading goals:', error);
+      setGoals([]);
+    }
+  };
+
+  const loadBudgets = async () => {
+    if (!user) return;
+    try {
+      const budgetsResult = await budgetService.getBudgets(user.id);
+      if (budgetsResult.success) {
+        setBudgets(budgetsResult.data || []);
+      } else {
+        console.error('Load budgets error:', budgetsResult.error);
+        setBudgets([]);
+      }
+    } catch (error) {
+      console.error('Error loading budgets:', error);
+      setBudgets([]);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    if (user) {
+      await loadAllData();
+    }
+    setRefreshing(false);
+  };
 
   const getTotalBalance = () => {
     let total = 0;
@@ -108,11 +291,19 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const getRecentTransactions = () => {
+    if (!transactions || !Array.isArray(transactions)) return [];
     return transactions.slice(0, 3);
   };
 
-  const handleTransactionAdded = (newTransaction) => {
+  const handleTransactionAdded = async (newTransaction) => {
+    // Transaction'ı ekle
     setTransactions(prev => [newTransaction, ...prev]);
+    
+    // Hesapları yeniden yükle (bakiye güncellemesi için)
+    await loadAccounts();
+    
+    // Tüm verileri yeniden yükle
+    await loadAllData();
   };
 
   const renderFABMenu = () => {
@@ -247,21 +438,25 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const getMonthlyStats = () => {
+    if (!transactions || transactions.length === 0) {
+      return { income: 0, expenses: 0 };
+    }
+
     const thisMonth = new Date().getMonth();
     const thisYear = new Date().getFullYear();
     
-    const monthlyTransactions = testUser.transactions.filter(transaction => {
+    const monthlyTransactions = transactions.filter(transaction => {
       const transactionDate = new Date(transaction.date);
       return transactionDate.getMonth() === thisMonth && transactionDate.getFullYear() === thisYear;
     });
 
     const income = monthlyTransactions
       .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum, t) => sum + parseFloat(t.amount), 0);
     
     const expenses = monthlyTransactions
       .filter(t => t.type === 'expense')
-      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+      .reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
 
     return { income, expenses };
   };
@@ -307,13 +502,15 @@ const HomeScreen = ({ navigation }) => {
   ];
 
   const getCategoryName = (categoryId) => {
-    const allCategories = [...testUser.categories.income, ...testUser.categories.expense];
+    if (!categories || !categories.income || !categories.expense) return 'Kategori';
+    const allCategories = [...categories.income, ...categories.expense];
     const category = allCategories.find(cat => cat.id === categoryId);
     return category ? category.name : 'Kategori';
   };
 
   const getCategoryIcon = (categoryId) => {
-    const allCategories = [...testUser.categories.income, ...testUser.categories.expense];
+    if (!categories || !categories.income || !categories.expense) return 'category';
+    const allCategories = [...categories.income, ...categories.expense];
     const category = allCategories.find(cat => cat.id === categoryId);
     return category ? category.icon : 'category';
   };
@@ -336,6 +533,26 @@ const HomeScreen = ({ navigation }) => {
     return <LoadingScreen message="Veriler yükleniyor..." />;
   }
 
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.errorContainer}>
+          <MaterialIcons name="error" size={64} color={theme.colors.error} />
+          <Text style={styles.errorTitle}>Hata Oluştu</Text>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => {
+            setError(null);
+            if (user) {
+              loadAllData();
+            }
+          }}>
+            <Text style={styles.retryButtonText}>Tekrar Dene</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView 
@@ -347,12 +564,65 @@ const HomeScreen = ({ navigation }) => {
         {/* Header Section */}
         <View style={styles.header}>
           <View style={styles.greeting}>
-            <Text style={styles.greetingText}>Merhaba,</Text>
-            <Text style={styles.userName}>{testUser.user.firstName} {testUser.user.lastName}</Text>
+            <AccessibleText 
+              style={styles.greetingText}
+              accessibilityLabel="Selamlama"
+              accessibilityHint="Kullanıcı selamlanıyor"
+            >
+              Merhaba,
+            </AccessibleText>
+            <AccessibleText 
+              style={styles.userName}
+              accessibilityLabel={`Kullanıcı adı: ${userData && userData.user ? `${userData.user.firstName} ${userData.user.lastName}` : 'Kullanıcı'}`}
+              accessibilityHint="Giriş yapmış kullanıcının adı"
+            >
+              {userData?.user ? `${userData.user.firstName} ${userData.user.lastName}` : 'Kullanıcı'}
+            </AccessibleText>
           </View>
-          <TouchableOpacity style={styles.notificationButton}>
-            <MaterialIcons name="notifications-none" size={24} color={theme.colors.textPrimary} />
+          <AccessibleButton
+            style={styles.notificationButton}
+            accessibilityLabel="Bildirimler"
+            accessibilityHint="Bildirimleri görüntüle"
+            onPress={() => {}}
+          >
+            <AccessibleIcon 
+              name="notifications-none" 
+              size={24} 
+              color={theme.colors.textPrimary}
+              accessibilityLabel="Bildirim ikonu"
+            />
             <View style={styles.notificationBadge} />
+          </AccessibleButton>
+          
+          {/* Supabase Test Button */}
+          <TouchableOpacity 
+            style={styles.testButton}
+            onPress={async () => {
+              const isConnected = await testSupabaseConnection();
+              if (isConnected) {
+                console.log('✅ Supabase bağlantısı başarılı');
+              } else {
+                console.log('❌ Supabase bağlantısı başarısız');
+              }
+            }}
+          >
+            <MaterialIcons name="wifi" size={20} color={theme.colors.textPrimary} />
+          </TouchableOpacity>
+          
+          {/* Kapsamlı Test Button */}
+          <TouchableOpacity 
+            style={[styles.testButton, { marginLeft: 8 }]}
+            onPress={async () => {
+              console.log('🔍 Kapsamlı test başlatılıyor...');
+              const allConnected = await testAllConnections();
+              if (allConnected) {
+                console.log('✅ Tüm bağlantılar başarılı!');
+              } else {
+                console.log('❌ Bazı bağlantılar başarısız!');
+              }
+            }}
+          >
+            <MaterialIcons name="check-circle" size={20} color={theme.colors.textPrimary} />
           </TouchableOpacity>
         </View>
 
@@ -479,30 +749,41 @@ const HomeScreen = ({ navigation }) => {
           </View>
           
           <View style={styles.transactionsList}>
-            {recentTransactions.map((transaction, index) => (
-              <TouchableOpacity key={transaction.id} style={styles.transactionItem}>
-                <View style={styles.transactionIcon}>
-                  <MaterialIcons 
-                    name={getCategoryIcon(transaction.categoryId)} 
-                    size={24} 
-                    color={transaction.type === 'income' ? '#48BB78' : '#F56565'} 
-                  />
-                </View>
-                <View style={styles.transactionDetails}>
-                  <Text style={styles.transactionTitle}>{transaction.description}</Text>
-                  <Text style={styles.transactionCategory}>{getCategoryName(transaction.categoryId)}</Text>
-                  <Text style={styles.transactionDate}>
-                    {new Date(transaction.date).toLocaleDateString('tr-TR')}
+            {recentTransactions.length > 0 ? (
+              recentTransactions.map((transaction, index) => (
+                <TouchableOpacity key={transaction.id || index} style={styles.transactionItem}>
+                  <View style={styles.transactionIcon}>
+                    <MaterialIcons 
+                      name={getCategoryIcon(transaction.category_id)} 
+                      size={24} 
+                      color={transaction.type === 'income' ? '#48BB78' : '#F56565'} 
+                    />
+                  </View>
+                  <View style={styles.transactionDetails}>
+                    <Text style={styles.transactionTitle}>{transaction.description || 'İşlem'}</Text>
+                    <Text style={styles.transactionCategory}>{getCategoryName(transaction.category_id)}</Text>
+                    <Text style={styles.transactionDate}>
+                      {new Date(transaction.date).toLocaleDateString('tr-TR')}
+                    </Text>
+                  </View>
+                  <Text style={[
+                    styles.transactionAmount,
+                    { color: transaction.type === 'income' ? '#48BB78' : '#F56565' }
+                  ]}>
+                    {transaction.type === 'income' ? '+' : ''}{formatCurrency(transaction.amount)}
                   </Text>
-                </View>
-                <Text style={[
-                  styles.transactionAmount,
-                  { color: transaction.type === 'income' ? '#48BB78' : '#F56565' }
-                ]}>
-                  {transaction.type === 'income' ? '+' : ''}{formatCurrency(transaction.amount)}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                </TouchableOpacity>
+              ))
+            ) : (
+              <EmptyState
+                type="transactions"
+                onAction={() => {
+                  setTransactionType('expense');
+                  setAddTransactionVisible(true);
+                }}
+                size="small"
+              />
+            )}
           </View>
         </View>
 
@@ -521,19 +802,19 @@ const HomeScreen = ({ navigation }) => {
             <CustomCard style={styles.overviewCard}>
               <MaterialIcons name="account-balance-wallet" size={32} color="#6C63FF" />
               <Text style={styles.overviewTitle}>Hesap Sayısı</Text>
-              <Text style={styles.overviewAmount}>{testUser.accounts.length}</Text>
+              <Text style={styles.overviewAmount}>{accounts.length}</Text>
             </CustomCard>
             
             <CustomCard style={styles.overviewCard}>
               <MaterialIcons name="receipt" size={32} color="#4ECDC4" />
               <Text style={styles.overviewTitle}>İşlem Sayısı</Text>
-              <Text style={styles.overviewAmount}>{testUser.transactions.length}</Text>
+              <Text style={styles.overviewAmount}>{transactions.length}</Text>
             </CustomCard>
             
             <CustomCard style={styles.overviewCard}>
-              <MaterialIcons name="flag" size={32} color="#FFE66D" />
-              <Text style={styles.overviewTitle}>Aktif Hedef</Text>
-              <Text style={styles.overviewAmount}>{testUser.goals.length}</Text>
+              <MaterialIcons name="flag" size={32} color="#9F7AEA" />
+              <Text style={styles.overviewTitle}>Hedef Sayısı</Text>
+              <Text style={styles.overviewAmount}>{goals.length}</Text>
             </CustomCard>
           </View>
         </View>
@@ -541,75 +822,74 @@ const HomeScreen = ({ navigation }) => {
         {/* Sabit Gelir ve Giderler Özeti */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Sabit Gelir & Giderler</Text>
-          <View style={styles.recurringContainer}>
-            {/* Sabit Gelirler */}
-            <View style={styles.recurringSection}>
-              <View style={styles.recurringHeader}>
-                <MaterialIcons name="trending-up" size={20} color="#48BB78" />
-                <Text style={styles.recurringSectionTitle}>Sabit Gelirler</Text>
-                <Text style={styles.recurringTotal}>
-                  +{formatCurrency(testUser.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0))}
+          {userData?.recurringTransactions ? (
+            <View style={styles.recurringContainer}>
+              {/* Sabit Gelirler */}
+              <View style={styles.recurringSection}>
+                <View style={styles.recurringHeader}>
+                  <MaterialIcons name="trending-up" size={20} color="#48BB78" />
+                  <Text style={styles.recurringSectionTitle}>Sabit Gelirler</Text>
+                  <Text style={styles.recurringTotal}>
+                    +{formatCurrency(userData.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0))}
+                  </Text>
+                </View>
+                <View style={styles.recurringItems}>
+                  {userData.recurringTransactions.income.map(item => (
+                    <View key={item.id} style={styles.recurringItem}>
+                      <Text style={styles.recurringItemName}>{item.name}</Text>
+                      <Text style={styles.recurringItemAmount}>+{formatCurrency(item.amount)}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+
+              {/* Sabit Giderler */}
+              <View style={styles.recurringSection}>
+                <View style={styles.recurringHeader}>
+                  <MaterialIcons name="trending-down" size={20} color="#F56565" />
+                  <Text style={styles.recurringSectionTitle}>Sabit Giderler</Text>
+                  <Text style={styles.recurringTotal}>
+                    -{formatCurrency(userData.recurringTransactions.expense.reduce((sum, item) => sum + item.amount, 0))}
+                  </Text>
+                </View>
+                <View style={styles.recurringItems}>
+                  {userData.recurringTransactions.expense.map(item => (
+                    <View key={item.id} style={styles.recurringItem}>
+                      <Text style={styles.recurringItemName}>{item.name}</Text>
+                      <Text style={styles.recurringItemAmount}>-{formatCurrency(item.amount)}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+
+              {/* Net Durum */}
+              <View style={styles.netStatusContainer}>
+                <Text style={[
+                  styles.netStatusText,
+                  { color: (userData.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) -
+                    userData.recurringTransactions.expense.reduce((sum, item) => sum + item.amount, 0)) >= 0
+                    ? '#48BB78' : '#F56565' }
+                ]}>
+                  Net: {(userData.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) -
+                    userData.recurringTransactions.expense.reduce((sum, item) => sum + item.amount, 0)) >= 0 ? '+' : ''}
+                  {formatCurrency(
+                    userData.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) -
+                    userData.recurringTransactions.expense.reduce((sum, item) => sum + item.amount, 0)
+                  )}
                 </Text>
               </View>
-              <View style={styles.recurringItems}>
-                {testUser.recurringTransactions.income.map(item => (
-                  <View key={item.id} style={styles.recurringItem}>
-                    <View style={styles.recurringItemIcon}>
-                      <MaterialIcons name={item.icon} size={16} color={item.color} />
-                    </View>
-                    <Text style={styles.recurringItemLabel}>{item.description}</Text>
-                    <Text style={[styles.recurringItemAmount, { color: '#48BB78' }]}>
-                      +{formatCurrency(item.amount)}
-                    </Text>
-                  </View>
-                ))}
-              </View>
             </View>
-
-            {/* Sabit Giderler */}
-            <View style={styles.recurringSection}>
-              <View style={styles.recurringHeader}>
-                <MaterialIcons name="trending-down" size={20} color="#F56565" />
-                <Text style={styles.recurringSectionTitle}>Sabit Giderler</Text>
-                <Text style={styles.recurringTotal}>
-                  -{formatCurrency(testUser.recurringTransactions.expenses.reduce((sum, item) => sum + item.amount, 0))}
-                </Text>
-              </View>
-              <View style={styles.recurringItems}>
-                {testUser.recurringTransactions.expenses.map(item => (
-                  <View key={item.id} style={styles.recurringItem}>
-                    <View style={styles.recurringItemIcon}>
-                      <MaterialIcons name={item.icon} size={16} color={item.color} />
-                    </View>
-                    <Text style={styles.recurringItemLabel}>{item.description}</Text>
-                    <Text style={[styles.recurringItemAmount, { color: '#F56565' }]}>
-                      -{formatCurrency(item.amount)}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            {/* Net Durum */}
-            <View style={styles.netBalanceContainer}>
-              <Text style={styles.netBalanceLabel}>Net Durum</Text>
-              <Text style={[
-                styles.netBalanceAmount,
-                { 
-                  color: (testUser.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) - 
-                          testUser.recurringTransactions.expenses.reduce((sum, item) => sum + item.amount, 0)) >= 0 
-                    ? '#48BB78' : '#F56565' 
-                }
-              ]}>
-                {(testUser.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) - 
-                  testUser.recurringTransactions.expenses.reduce((sum, item) => sum + item.amount, 0)) >= 0 ? '+' : ''}
-                {formatCurrency(
-                  testUser.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) - 
-                  testUser.recurringTransactions.expenses.reduce((sum, item) => sum + item.amount, 0)
-                )}
-              </Text>
-            </View>
-          </View>
+          ) : (
+            <EmptyState
+              type="general"
+              title="Sabit Gelir/Gider Yok"
+              subtitle="Düzenli gelir ve giderlerinizi tanımlayarak finansal planlamanızı kolaylaştırın"
+              actionText="Ekle"
+              actionIcon="add"
+              onAction={() => navigation.navigate('Transactions')}
+              size="small"
+            />
+          )}
         </View>
 
         {/* Altın & Döviz kısayolu halen Hızlı İşlemlerden erişilebilir */}
@@ -622,33 +902,79 @@ const HomeScreen = ({ navigation }) => {
               <Text style={styles.seeAllButton}>Yönet</Text>
             </TouchableOpacity>
           </View>
-          {testUser.goals.map((goal) => {
-            const progress = (goal.currentAmount / goal.targetAmount) * 100;
-            return (
-              <CustomCard key={goal.id} style={styles.goalCard}>
-                <View style={styles.goalHeader}>
-                  <MaterialIcons name={goal.icon} size={24} color={goal.color} />
-                  <Text style={styles.goalTitle}>{goal.name}</Text>
-                </View>
-                <View style={styles.goalProgress}>
-                  <View style={styles.goalProgressBar}>
-                    <View style={[styles.goalProgressFill, { width: `${progress}%`, backgroundColor: goal.color }]} />
+          {userData?.goals ? (
+            userData.goals.filter(goal => goal.showOnHome).map((goal) => {
+              const progress = (goal.currentAmount / goal.targetAmount) * 100;
+              return (
+                <CustomCard key={goal.id} style={styles.goalCard}>
+                  <View style={styles.goalHeader}>
+                    <MaterialIcons name={goal.icon} size={24} color={goal.color} />
+                    <Text style={styles.goalTitle}>{goal.name}</Text>
+                    <Text style={styles.goalAmount}>{formatCurrency(goal.currentAmount)} / {formatCurrency(goal.targetAmount)}</Text>
                   </View>
-                  <Text style={styles.goalProgressText}>{Math.round(progress)}%</Text>
-                </View>
-                <Text style={styles.goalAmount}>
-                  {formatCurrency(goal.currentAmount)} / {formatCurrency(goal.targetAmount)}
-                </Text>
-              </CustomCard>
-            );
-          })}
+                  <View style={styles.progressContainer}>
+                    <View style={[styles.progressBar, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                      <View style={[styles.progressFill, { width: `${Math.min(progress, 100)}%`, backgroundColor: goal.color }]} />
+                    </View>
+                    <Text style={styles.progressText}>{Math.round(progress)}%</Text>
+                  </View>
+                </CustomCard>
+              );
+            })
+          ) : (
+            <EmptyState
+              type="goals"
+              onAction={() => navigation.navigate('Budget')}
+              size="small"
+            />
+          )}
+        </View>
+
+        {/* Budgets Progress */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Bütçelerim</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Budget')}>
+              <Text style={styles.seeAllButton}>Yönet</Text>
+            </TouchableOpacity>
+          </View>
+          {userData?.budgets ? (
+            userData.budgets.filter(budget => budget.showOnHome).map((budget) => {
+              const progress = (budget.spent / budget.limit) * 100;
+              const isOverBudget = progress > 100;
+              return (
+                <CustomCard key={budget.id} style={styles.budgetCard}>
+                  <View style={styles.budgetHeader}>
+                    <MaterialIcons name={budget.icon} size={24} color={budget.color} />
+                    <Text style={styles.budgetTitle}>{budget.name}</Text>
+                    <Text style={[styles.budgetAmount, { color: isOverBudget ? '#F56565' : '#48BB78' }]}>
+                      {formatCurrency(budget.spent)} / {formatCurrency(budget.limit)}
+                    </Text>
+                  </View>
+                  <View style={styles.progressContainer}>
+                    <View style={[styles.progressBar, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                      <View style={[styles.progressFill, { width: `${Math.min(progress, 100)}%`, backgroundColor: isOverBudget ? '#F56565' : budget.color }]} />
+                    </View>
+                    <Text style={[styles.progressText, { color: isOverBudget ? '#F56565' : budget.color }]}>
+                      {Math.round(progress)}%
+                    </Text>
+                  </View>
+                </CustomCard>
+              );
+            })
+          ) : (
+            <EmptyState
+              type="budgets"
+              onAction={() => navigation.navigate('Budget')}
+              size="small"
+            />
+          )}
         </View>
 
         <View style={styles.bottomPadding} />
       </ScrollView>
 
       {/* Floating Action Button */}
-      {/* FAB Menu */}
       {renderFABMenu()}
 
       {/* Modals */}
@@ -859,22 +1185,22 @@ const styles = StyleSheet.create({
   },
 
   section: {
-    marginBottom: theme.spacing.xl,
+    marginBottom: theme.layout.sectionSpacing,
   },
 
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.lg,
+    paddingHorizontal: theme.layout.contentPadding,
     marginBottom: theme.spacing.md,
   },
 
   sectionTitle: {
-    fontSize: 18,
+    fontSize: theme.typography.h4.fontSize,
     color: theme.colors.textPrimary,
     fontWeight: '700',
-    paddingHorizontal: theme.spacing.lg,
+    paddingHorizontal: theme.layout.contentPadding,
     marginBottom: theme.spacing.md,
   },
 
@@ -887,7 +1213,7 @@ const styles = StyleSheet.create({
   quickActions: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingHorizontal: theme.spacing.lg,
+    paddingHorizontal: theme.layout.contentPadding,
   },
 
   quickActionButton: {
@@ -897,48 +1223,40 @@ const styles = StyleSheet.create({
   },
 
   quickActionGradient: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: theme.screen.isSmall ? 48 : theme.screen.isMedium ? 52 : 56,
+    height: theme.screen.isSmall ? 48 : theme.screen.isMedium ? 52 : 56,
+    borderRadius: theme.screen.isSmall ? 24 : theme.screen.isMedium ? 26 : 28,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: theme.spacing.sm,
-    elevation: 4,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    ...theme.shadows.medium,
   },
 
   quickActionLabel: {
-    fontSize: 12,
+    fontSize: theme.typography.bodySmall.fontSize,
     color: theme.colors.textPrimary,
     fontWeight: '600',
     textAlign: 'center',
   },
 
   transactionsList: {
-    paddingHorizontal: theme.spacing.lg,
+    paddingHorizontal: theme.layout.contentPadding,
   },
 
   transactionItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: theme.colors.cards,
-    padding: theme.spacing.md,
+    padding: theme.screen.isSmall ? theme.spacing.sm : theme.spacing.md,
     marginBottom: theme.spacing.sm,
     borderRadius: theme.borderRadius.md,
-    elevation: 2,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    ...theme.shadows.small,
   },
 
   transactionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: theme.screen.isSmall ? 40 : theme.screen.isMedium ? 44 : 48,
+    height: theme.screen.isSmall ? 40 : theme.screen.isMedium ? 44 : 48,
+    borderRadius: theme.screen.isSmall ? 20 : theme.screen.isMedium ? 22 : 24,
     backgroundColor: theme.colors.background,
     justifyContent: 'center',
     alignItems: 'center',
@@ -950,7 +1268,7 @@ const styles = StyleSheet.create({
   },
 
   transactionTitle: {
-    fontSize: 16,
+    fontSize: theme.typography.bodyLarge.fontSize,
     color: theme.colors.textPrimary,
     fontWeight: '600',
     marginBottom: 2,
@@ -1054,8 +1372,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: theme.colors.textSecondary,
     fontWeight: '500',
+    marginTop: theme.spacing.xs,
   },
-
+  progressContainer: {
+    marginTop: theme.spacing.sm,
+  },
+  progressBar: {
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: theme.spacing.xs,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  budgetTitle: {
+    fontSize: 16,
+    color: theme.colors.textPrimary,
+    fontWeight: '600',
+    flex: 1,
+    marginLeft: theme.spacing.sm,
+  },
+  budgetAmount: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+  },
   fabContainer: {
     position: 'absolute',
     bottom: 90,
@@ -1279,12 +1627,12 @@ const styles = StyleSheet.create({
   },
   topCardsContainer: {
     paddingVertical: theme.spacing.sm,
-    paddingHorizontal: 0, // Sol margin kaldırıldı - tam ekran için
+    paddingHorizontal: theme.screen.isSmall ? theme.spacing.md : theme.screen.isMedium ? theme.spacing.lg : theme.spacing.xl,
   },
   topCard: {
-    marginRight: 0, // Kartlar arası boşluk yok
+    marginRight: CARD_GAP,
     // Kartların daha iyi görünmesi için
-    minHeight: 180,
+    minHeight: theme.screen.isSmall ? 160 : theme.screen.isMedium ? 180 : 200,
   },
   assetsCard: {
     backgroundColor: 'transparent',
@@ -1331,17 +1679,10 @@ const styles = StyleSheet.create({
   recurringContainer: {
     backgroundColor: 'rgba(255,255,255,0.95)',
     borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.md,
-    marginHorizontal: theme.spacing.lg,
+    padding: theme.screen.isSmall ? theme.spacing.md : theme.spacing.lg,
+    marginHorizontal: theme.screen.isSmall ? theme.spacing.md : theme.spacing.lg,
     marginBottom: theme.spacing.md,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
+    ...theme.shadows.medium,
   },
   recurringSection: {
     marginBottom: theme.spacing.md,
@@ -1464,6 +1805,164 @@ const styles = StyleSheet.create({
   netBalanceItemValue: {
     fontSize: 16,
     fontWeight: '700',
+  },
+  emptyText: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    paddingVertical: theme.spacing.md,
+  },
+  emptyContainer: {
+    paddingVertical: theme.spacing.md,
+    alignItems: 'center',
+  },
+
+  // Budget Card Styles
+  budgetCard: {
+    backgroundColor: '#FFFFFF',
+    padding: theme.spacing.lg,
+    borderRadius: theme.borderRadius.lg,
+    marginBottom: theme.spacing.md,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+
+  budgetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+  },
+
+  budgetIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F7FAFC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing.md,
+  },
+
+  budgetInfo: {
+    flex: 1,
+  },
+
+  budgetCategory: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginBottom: 2,
+  },
+
+  budgetAmount: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+  },
+
+  budgetStatus: {
+    alignItems: 'flex-end',
+  },
+
+  budgetPercentage: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  budgetProgressBar: {
+    height: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    marginBottom: theme.spacing.md,
+    overflow: 'hidden',
+  },
+
+  budgetProgressFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+
+  budgetFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  budgetRemaining: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+  },
+
+  overBudgetText: {
+    fontSize: 14,
+    color: '#F56565',
+    fontWeight: '500',
+  },
+  recurringItemName: {
+    fontSize: 13,
+    color: theme.colors.textPrimary,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  netStatusContainer: {
+    marginTop: theme.spacing.md,
+    paddingTop: theme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.2)',
+  },
+  netStatusText: {
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: theme.spacing.xs,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    paddingVertical: theme.spacing.md,
+  },
+
+  // Error styles
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.xl,
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+    marginTop: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.lg,
+  },
+  retryButton: {
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  testButton: {
+    padding: theme.spacing.sm,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginLeft: theme.spacing.sm,
   },
 });
 

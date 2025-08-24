@@ -1,10 +1,10 @@
 // FinanceFlow - Main App Navigator
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+// NavigationContainer App.js'de kullanılıyor
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Animated } from 'react-native';
 
 // Import screens
 import OnboardingScreen from '../screens/OnboardingScreen';
@@ -33,6 +33,35 @@ const AuthStack = () => {
       screenOptions={{
         headerShown: false,
         cardStyle: { backgroundColor: theme.colors.background },
+        animationEnabled: true,
+        cardStyleInterpolator: ({ current, layouts }) => {
+          return {
+            cardStyle: {
+              transform: [
+                {
+                  translateX: current.progress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [layouts.screen.width, 0],
+                  }),
+                },
+              ],
+            },
+          };
+        },
+        transitionSpec: {
+          open: {
+            animation: 'timing',
+            config: {
+              duration: 300,
+            },
+          },
+          close: {
+            animation: 'timing',
+            config: {
+              duration: 300,
+            },
+          },
+        },
       }}
     >
       <Stack.Screen name="Login" component={LoginScreen} />
@@ -48,6 +77,7 @@ const MainTabs = () => {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        animationEnabled: true,
         tabBarIcon: ({ focused, color, size }) => {
           let iconName;
 
@@ -71,22 +101,36 @@ const MainTabs = () => {
               iconName = 'circle';
           }
 
-          return <MaterialIcons name={iconName} size={size} color={color} />;
+          return (
+            <View style={{
+              transform: [{ scale: focused ? 1.2 : 1 }],
+              opacity: focused ? 1 : 0.7,
+            }}>
+              <MaterialIcons name={iconName} size={size} color={color} />
+            </View>
+          );
         },
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.textSecondary,
         tabBarStyle: {
           backgroundColor: theme.colors.cards,
           borderTopWidth: 1,
           borderTopColor: '#E2E8F0',
           paddingVertical: 8,
           height: 70,
+          elevation: 8,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 4,
         },
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '500',
           marginBottom: 4,
         },
+        tabBarHideOnKeyboard: true,
+        tabBarShowLabel: true,
+        tabBarActiveTintColor: theme.colors.primary,
+        tabBarInactiveTintColor: theme.colors.textSecondary,
       })}
     >
       <Tab.Screen 
@@ -134,48 +178,83 @@ const LoadingScreen = () => (
 const AppNavigator = () => {
   const { isAuthenticated, isLoading, hasCompletedOnboarding } = useAuth();
 
+  console.log('Navigation State:', { isAuthenticated, isLoading, hasCompletedOnboarding });
+
   // Show loading screen while checking auth state
   if (isLoading) {
     return <LoadingScreen />;
   }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator
-        screenOptions={{
-          headerShown: false,
-          cardStyle: { backgroundColor: theme.colors.background },
-          animationEnabled: true,
-        }}
-      >
-        {!hasCompletedOnboarding ? (
-          // Onboarding Flow
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+        cardStyle: { backgroundColor: theme.colors.background },
+        animationEnabled: true,
+        cardStyleInterpolator: ({ current, layouts }) => {
+          return {
+            cardStyle: {
+              transform: [
+                {
+                  translateX: current.progress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [layouts.screen.width, 0],
+                  }),
+                },
+              ],
+            },
+          };
+        },
+        transitionSpec: {
+          open: {
+            animation: 'timing',
+            config: {
+              duration: 300,
+            },
+          },
+          close: {
+            animation: 'timing',
+            config: {
+              duration: 300,
+            },
+          },
+        },
+      }}
+    >
+      {!hasCompletedOnboarding ? (
+        // Onboarding Flow
+        <Stack.Screen 
+          name="Onboarding" 
+          component={OnboardingScreen}
+          options={{
+            gestureEnabled: false,
+          }}
+        />
+      ) : !isAuthenticated ? (
+        // Auth Flow - AuthStack component'ini doğrudan kullan
+        <Stack.Screen 
+          name="AuthStack" 
+          component={AuthStack}
+          options={{
+            gestureEnabled: false,
+          }}
+        />
+      ) : (
+        // Main App Flow
+        <>
           <Stack.Screen 
-            name="Onboarding" 
-            component={OnboardingScreen}
+            name="Main" 
+            component={MainTabs}
             options={{
               gestureEnabled: false,
             }}
           />
-        ) : !isAuthenticated ? (
-          // Auth Flow
-          <Stack.Screen name="Auth" component={AuthStack} />
-        ) : (
-          // Main App Flow
-          <>
-            <Stack.Screen 
-              name="Main" 
-              component={MainTabs}
-              options={{
-                gestureEnabled: false,
-              }}
-            />
-            <Stack.Screen name="GoldCurrency" component={GoldCurrencyScreen} />
-            <Stack.Screen name="Budget" component={BudgetScreen} />
-          </>
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+          <Stack.Screen name="GoldCurrency" component={GoldCurrencyScreen} />
+          <Stack.Screen name="Budget" component={BudgetScreen} />
+          <Stack.Screen name="Analytics" component={AnalyticsScreen} />
+        </>
+      )}
+    </Stack.Navigator>
   );
 };
 

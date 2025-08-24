@@ -122,15 +122,13 @@ const OnboardingScreen = ({ navigation }) => {
   };
 
   const handleSkip = async () => {
-    // Onboarding'i atla ve auth ekranına git
+    // Onboarding'i atla - AppNavigator otomatik olarak auth ekranına yönlendirecek
     await completeOnboarding();
-    navigation.replace('Auth');
   };
 
   const handleFinish = async () => {
-    // Onboarding tamamlandı, auth ekranına git
+    // Onboarding tamamlandı - AppNavigator otomatik olarak auth ekranına yönlendirecek
     await completeOnboarding();
-    navigation.replace('Auth');
   };
 
   const renderPage = (item, index) => {

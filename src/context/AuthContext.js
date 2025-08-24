@@ -1,10 +1,11 @@
 // FinanceFlow - Authentication Context Provider
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { testUser } from '../utils/testData';
+import { supabase } from '../config/supabase';
 
+// Context oluşturma
 const AuthContext = createContext();
 
+// Custom hook
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -13,234 +14,428 @@ export const useAuth = () => {
   return context;
 };
 
+// Provider component
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userProfile, setUserProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState(null);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
+  const [sessionTimeout, setSessionTimeout] = useState(null);
 
-  // AsyncStorage keys
-  const STORAGE_KEYS = {
-    USER_DATA: 'financeflow_user_data',
-    AUTH_TOKEN: 'financeflow_auth_token',
-    ONBOARDING_COMPLETED: 'financeflow_onboarding_completed',
-    REMEMBER_ME: 'financeflow_remember_me',
-  };
-
-  // Initialize auth state on app start
+  // Kullanıcı oturum durumunu kontrol et
   useEffect(() => {
-    initializeAuth();
+    // Onboarding durumunu kontrol et
+    const checkOnboarding = async () => {
+      try {
+        const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+        const onboardingCompleted = await AsyncStorage.getItem('onboarding_completed');
+        setHasCompletedOnboarding(onboardingCompleted === 'true');
+      } catch (error) {
+        console.error('Onboarding check error:', error);
+        setHasCompletedOnboarding(false);
+      }
+    };
+
+    // Mevcut oturumu kontrol et
+    const checkSession = async () => {
+      try {
+        // Supabase'den mevcut session'ı al
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        
+        if (currentSession) {
+          setSession(currentSession);
+          setUser(currentSession.user);
+          
+          // Kullanıcı profilini al
+          try {
+            const { data: profile } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', currentSession.user.id)
+              .single();
+            
+            if (profile) {
+              setUserProfile(profile);
+            }
+          } catch (profileError) {
+            console.warn('Profile fetch error:', profileError);
+          }
+        }
+      } catch (error) {
+        console.error('Session check error:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    // Her ikisini de kontrol et
+    checkOnboarding();
+    checkSession();
+
+    // Auth state değişikliklerini dinle
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth state changed:', event, session);
+        
+        if (event === 'SIGNED_IN' && session) {
+          setSession(session);
+          setUser(session.user);
+          
+          // Kullanıcı profilini al
+          try {
+            const { data: profile } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', session.user.id)
+              .single();
+            
+            if (profile) {
+              setUserProfile(profile);
+            }
+          } catch (profileError) {
+            console.warn('Profile fetch error:', profileError);
+          }
+          
+          // Session timeout'u başlat
+          startSessionTimeout(session);
+        } else if (event === 'SIGNED_OUT') {
+          setSession(null);
+          setUser(null);
+          setUserProfile(null);
+          clearSessionTimeout();
+        } else if (event === 'TOKEN_REFRESHED' && session) {
+          setSession(session);
+          setUser(session.user);
+          
+          // Session timeout'u yenile
+          clearSessionTimeout();
+          startSessionTimeout(session);
+        }
+        
+        setLoading(false);
+      }
+    );
+
+    return () => {
+      subscription?.unsubscribe();
+      clearSessionTimeout();
+    };
   }, []);
 
-  const initializeAuth = async () => {
+  // Kayıt olma
+  const signUp = async (email, password, userData) => {
     try {
-      setIsLoading(true);
+      setLoading(true);
       
-      // Check if onboarding is completed
-      const onboardingCompleted = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING_COMPLETED);
-      setHasCompletedOnboarding(onboardingCompleted === 'true');
-
-      // Check if user is logged in
-      const authToken = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-      const userData = await AsyncStorage.getItem(STORAGE_KEYS.USER_DATA);
-
-      if (authToken && userData) {
-        const parsedUser = JSON.parse(userData);
-        setUser(parsedUser);
-        setIsAuthenticated(true);
+      // firstName ve lastName'i birleştir
+      const fullName = userData.firstName && userData.lastName 
+        ? `${userData.firstName} ${userData.lastName}`.trim()
+        : 'Kullanıcı';
+      
+      const { data, error } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+        options: {
+          data: {
+            ...userData,
+            full_name: fullName // full_name ekle
+          },
+          emailRedirectTo: 'financeflow://signup',
+        },
+      });
+      
+      if (error) {
+        throw error;
       }
-    } catch (error) {
-      console.error('Auth initialization error:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
-  // Login function
-  const login = async (email, password, rememberMe = false) => {
-    try {
-      setIsLoading(true);
-
-      // For now, use test user validation
-      if (email === testUser.user.email && password === testUser.user.password) {
-        const userData = {
-          ...testUser.user,
-          lastLogin: new Date().toISOString(),
-        };
-
-        // Save to AsyncStorage
-        await AsyncStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(userData));
-        await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, 'test_token_' + Date.now());
+      // Başarılı kayıt sonrası user state'i güncelle
+      if (data?.user) {
+        setUser(data.user);
+        setSession(data);
         
-        if (rememberMe) {
-          await AsyncStorage.setItem(STORAGE_KEYS.REMEMBER_ME, 'true');
+        // Kullanıcı profilini al
+        const { data: profile } = await supabase.from('users').select('*').eq('id', data.user.id).single();
+        if (profile) {
+          setUserProfile(profile);
         }
-
-        setUser(userData);
-        setIsAuthenticated(true);
-        
-        return { success: true, user: userData };
-      } else {
-        return { 
-          success: false, 
-          error: 'Geçersiz e-posta veya şifre' 
-        };
       }
+
+      return { success: true, data };
     } catch (error) {
-      console.error('Login error:', error);
-      return { 
-        success: false, 
-        error: 'Giriş yapılırken bir hata oluştu' 
-      };
+      console.error('Sign up error in context:', error);
+      
+      // Özel hata mesajları
+      let errorMessage = 'Kayıt işlemi başarısız';
+      
+      if (error.message?.includes('User already registered')) {
+        errorMessage = 'Bu email adresi zaten kayıtlı. Giriş yapmayı deneyin.';
+      } else if (error.message?.includes('Invalid email')) {
+        errorMessage = 'Geçersiz email adresi.';
+      } else if (error.message?.includes('Password should be at least')) {
+        errorMessage = 'Şifre en az 6 karakter olmalıdır.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      return { success: false, error: errorMessage };
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  // Logout function
-  const logout = async () => {
+  // Giriş yapma
+  const signIn = async (email, password) => {
     try {
-      setIsLoading(true);
+      setLoading(true);
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password,
+      });
       
-      // Clear AsyncStorage
-      await AsyncStorage.multiRemove([
-        STORAGE_KEYS.USER_DATA,
-        STORAGE_KEYS.AUTH_TOKEN,
-      ]);
+      if (error) {
+        throw error;
+      }
 
-      // Clear remember me if not set
-      const rememberMe = await AsyncStorage.getItem(STORAGE_KEYS.REMEMBER_ME);
-      if (rememberMe !== 'true') {
-        await AsyncStorage.removeItem(STORAGE_KEYS.REMEMBER_ME);
+      // Başarılı giriş sonrası user state'i güncelle
+      if (data?.user) {
+        setUser(data.user);
+        setSession(data);
+        
+        // Kullanıcı profilini al
+        const { data: profile } = await supabase.from('users').select('*').eq('id', data.user.id).single();
+        if (profile) {
+          setUserProfile(profile);
+        }
+      }
+
+      return { success: true, data };
+    } catch (error) {
+      console.error('Sign in error in context:', error);
+      
+      // Özel hata mesajları
+      let errorMessage = 'Giriş işlemi başarısız';
+      
+      if (error.message?.includes('Invalid login credentials')) {
+        errorMessage = 'Email veya şifre hatalı.';
+      } else if (error.message?.includes('Email not confirmed')) {
+        errorMessage = 'Email adresinizi onaylayın.';
+      } else if (error.message?.includes('Too many requests')) {
+        errorMessage = 'Çok fazla deneme. Lütfen bekleyin.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Çıkış yapma
+  const signOut = async () => {
+    try {
+      setLoading(true);
+      const { error } = await supabase.auth.signOut();
+      
+      if (error) {
+        throw error;
       }
 
       setUser(null);
-      setIsAuthenticated(false);
+      setUserProfile(null);
+      setSession(null);
+      
+      return { success: true };
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('Sign out error in context:', error);
+      return { success: false, error: error.message || 'Çıkış işlemi başarısız' };
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  // Complete onboarding
-  const completeOnboarding = async () => {
+  // Kullanıcı profilini güncelleme
+  const updateProfile = async (updates) => {
     try {
-      await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETED, 'true');
-      setHasCompletedOnboarding(true);
-    } catch (error) {
-      console.error('Onboarding completion error:', error);
-    }
-  };
+      if (!user) throw new Error('Kullanıcı oturum açmamış');
 
-  // Update user data
-  const updateUser = async (newUserData) => {
-    try {
-      const updatedUser = { ...user, ...newUserData };
-      await AsyncStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(updatedUser));
-      setUser(updatedUser);
-    } catch (error) {
-      console.error('User update error:', error);
-    }
-  };
-
-  // Check if user exists (for registration)
-  const checkUserExists = async (email) => {
-    // For now, check against test user
-    return email === testUser.user.email;
-  };
-
-  // Register new user
-  const register = async (userData) => {
-    try {
-      setIsLoading(true);
-
-      // Check if user already exists
-      const exists = await checkUserExists(userData.email);
-      if (exists) {
-        return { 
-          success: false, 
-          error: 'Bu e-posta adresi zaten kullanılıyor' 
-        };
+      const { data, error } = await supabase.from('users').update(updates).eq('id', user.id).select().single();
+      
+      if (error) {
+        throw error;
       }
 
-      // Create new user (for now, just simulate)
-      const newUser = {
-        id: 'user_' + Date.now(),
-        ...userData,
-        createdAt: new Date().toISOString(),
-        lastLogin: new Date().toISOString(),
-        isVerified: false,
-        preferences: {
-          currency: 'TRY',
-          language: 'tr',
-          notifications: true,
-          darkMode: false,
-        }
-      };
-
-      // Save to AsyncStorage
-      await AsyncStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(newUser));
-      await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, 'token_' + Date.now());
-
-      setUser(newUser);
-      setIsAuthenticated(true);
-
-      return { success: true, user: newUser };
+      setUserProfile(data);
+      return { success: true, data };
     } catch (error) {
-      console.error('Registration error:', error);
-      return { 
-        success: false, 
-        error: 'Kayıt olurken bir hata oluştu' 
-      };
-    } finally {
-      setIsLoading(false);
+      console.error('Update profile error in context:', error);
+      return { success: false, error: error.message || 'Profil güncellenemedi' };
     }
   };
 
-  // Reset password
+  // Şifre sıfırlama
   const resetPassword = async (email) => {
     try {
-      setIsLoading(true);
-      
-      // Check if user exists
-      const exists = await checkUserExists(email);
-      if (!exists) {
-        return { 
-          success: false, 
-          error: 'Bu e-posta adresi ile kayıtlı kullanıcı bulunamadı' 
-        };
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: 'financeflow://reset-password',
+      });
+
+      if (error) {
+        throw error;
       }
 
-      // For now, just simulate password reset
-      // In real app, this would send email
-      return { 
-        success: true, 
-        message: 'Şifre sıfırlama bağlantısı e-posta adresinize gönderildi' 
-      };
+      return { success: true };
     } catch (error) {
-      console.error('Password reset error:', error);
-      return { 
-        success: false, 
-        error: 'Şifre sıfırlama işlemi başarısız oldu' 
-      };
-    } finally {
-      setIsLoading(false);
+      console.error('Reset password error in context:', error);
+      return { success: false, error: error.message || 'Şifre sıfırlama başarısız' };
     }
   };
 
+  // Şifre değiştirme
+  const updatePassword = async (newPassword) => {
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('Update password error in context:', error);
+      return { success: false, error: error.message || 'Şifre güncellenemedi' };
+    }
+  };
+
+  // Email değiştirme
+  const updateEmail = async (newEmail) => {
+    try {
+      const { error } = await supabase.auth.updateUser({
+        email: newEmail
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('Update email error in context:', error);
+      return { success: false, error: error.message || 'Email güncellenemedi' };
+    }
+  };
+
+  // Session timeout functions
+  const startSessionTimeout = (currentSession) => {
+    if (!currentSession?.access_token) return;
+    
+    // Token'ın expire olma süresini hesapla (varsayılan: 1 saat)
+    const expiresAt = currentSession.expires_at * 1000; // Unix timestamp'i milisaniyeye çevir
+    const now = Date.now();
+    const timeUntilExpiry = expiresAt - now;
+    
+    if (timeUntilExpiry > 0) {
+      // Session timeout'u başlat
+      const timeout = setTimeout(() => {
+        handleSessionExpired();
+      }, timeUntilExpiry);
+      
+      setSessionTimeout(timeout);
+    }
+  };
+
+  const clearSessionTimeout = () => {
+    if (sessionTimeout) {
+      clearTimeout(sessionTimeout);
+      setSessionTimeout(null);
+    }
+  };
+
+  const handleSessionExpired = async () => {
+    console.log('Session expired, logging out user');
+    
+    // Kullanıcıyı otomatik olarak çıkış yap
+    setUser(null);
+    setUserProfile(null);
+    setSession(null);
+    clearSessionTimeout();
+    
+    // Supabase'den çıkış yap
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error('Auto logout error:', error);
+    }
+  };
+
+  // Onboarding tamamlama
+  const completeOnboarding = async () => {
+    try {
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      await AsyncStorage.setItem('onboarding_completed', 'true');
+      setHasCompletedOnboarding(true);
+      return { success: true };
+    } catch (error) {
+      console.error('Complete onboarding error:', error);
+      return { success: false, error };
+    }
+  };
+
+  // Kullanıcı silme
+  const deleteAccount = async () => {
+    try {
+      if (!user) throw new Error('Kullanıcı oturum açmamış');
+
+      // Kullanıcı profilini sil
+      const { error: profileError } = await supabase
+        .from('users')
+        .delete()
+        .eq('id', user.id);
+
+      if (profileError) {
+        console.error('Delete profile error:', profileError);
+      }
+
+      // Auth kullanıcısını sil
+      const { error } = await supabase.auth.admin.deleteUser(user.id);
+      
+      if (error) {
+        throw error;
+      }
+
+      setUser(null);
+      setUserProfile(null);
+      setSession(null);
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Delete account error in context:', error);
+      return { success: false, error: error.message || 'Hesap silinemedi' };
+    }
+  };
+
+
+
+  // Context value
   const value = {
     user,
-    isAuthenticated,
-    isLoading,
+    userProfile,
+    session,
+    loading,
     hasCompletedOnboarding,
-    login,
-    logout,
-    register,
+    signUp,
+    signIn,
+    signOut,
+    updateProfile,
     resetPassword,
+    updatePassword,
+    updateEmail,
+    deleteAccount,
     completeOnboarding,
-    updateUser,
-    checkUserExists,
+    isAuthenticated: !!user,
   };
 
   return (
@@ -249,3 +444,6 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
+
+export default AuthContext;
+
