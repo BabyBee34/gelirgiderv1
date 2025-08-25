@@ -173,3 +173,32 @@
 - Kritik buglar öncelikli olarak düzeltilecek
 - Supabase bağlantıları en yüksek öncelik
 - UI/UX iyileştirmeleri ikinci öncelik
+
+## ✅ Tamamlanan Özellikler
+
+### Silme Sistemi
+- [x] Sabit gelir/gider listesine silme butonu eklendi (çöp kutusu ikonu)
+- [x] Son İşlemler listesine uzun basma ile silme özelliği eklendi
+- [x] TransactionsScreen'e silme butonu eklendi (her işlem satırında)
+- [x] Silme sonrası veriler otomatik yenileniyor
+- [x] Bakiye ve özetler güncelleniyor
+- [x] Onay dialog'ları eklendi
+
+### Düzenli İşlem Sistemi
+- [x] Dinamik tekrar metni (seçilen tarih ve sıklığa göre)
+- [x] Tarih alanları (day_of_week, day_of_month, month_of_year)
+- [x] Onay sistemi (maaş, büyük gider)
+- [x] Bildirim sistemi
+- [x] Çift onay engeli
+- [x] Güvenli bakiye güncelleme
+
+## 🔄 Devam Eden Geliştirmeler
+
+### UI/UX İyileştirmeleri
+- [ ] Silme butonlarının görsel tasarımı iyileştirilebilir
+- [ ] Silme animasyonları eklenebilir
+- [ ] Geri alma (undo) özelliği eklenebilir
+
+### Performans Optimizasyonları
+- [ ] Silme sonrası sadece gerekli veriler yenilenebilir
+- [ ] Batch silme işlemleri eklenebilir

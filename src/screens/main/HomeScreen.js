@@ -743,6 +743,53 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
+  // Silme işlemleri
+  const handleDeleteRecurring = async (recurringId) => {
+    try {
+      Alert.alert(
+        'Sabit İşlem Silinsin mi?',
+        'Bu sabit gelir/gider kalıcı olarak silinecek.',
+        [
+          { text: 'İptal', style: 'cancel' },
+          { text: 'Sil', style: 'destructive', onPress: async () => {
+              const result = await recurringTransactionService.deleteRecurringTransaction(recurringId);
+              if (result.success) {
+                await loadAllData();
+                Alert.alert('Başarılı', 'Sabit işlem silindi');
+              } else {
+                Alert.alert('Hata', result.error || 'Sabit işlem silinemedi');
+              }
+            } }
+        ]
+      );
+    } catch (e) {
+      Alert.alert('Hata', e.message || 'Sabit işlem silinemedi');
+    }
+  };
+
+  const handleDeleteTransaction = async (transactionId) => {
+    try {
+      Alert.alert(
+        'İşlem Silinsin mi?',
+        'Bu işlem kalıcı olarak silinecek ve bakiye geri düzeltilecek.',
+        [
+          { text: 'İptal', style: 'cancel' },
+          { text: 'Sil', style: 'destructive', onPress: async () => {
+              const result = await transactionService.deleteTransaction(transactionId);
+              if (result.success) {
+                await loadAllData();
+                Alert.alert('Başarılı', 'İşlem silindi');
+              } else {
+                Alert.alert('Hata', result.error?.message || 'İşlem silinemedi');
+              }
+            } }
+        ]
+      );
+    } catch (e) {
+      Alert.alert('Hata', e.message || 'İşlem silinemedi');
+    }
+  };
+
   const renderRecurringTransactionItem = (item, type) => {
     const isOverdue = item.next_due_date && new Date(item.next_due_date) < new Date();
     const amountColor = type === 'income' ? '#48BB78' : '#F56565';
@@ -791,6 +838,9 @@ const HomeScreen = ({ navigation }) => {
           <Text style={styles.recurringItemAccount}>
             {item.account?.name || 'Hesap'}
           </Text>
+          <TouchableOpacity onPress={() => handleDeleteRecurring(item.id)} style={{ padding: 6 }}>
+            <MaterialIcons name="delete-outline" size={18} color="#A0AEC0" />
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -1262,7 +1312,12 @@ const HomeScreen = ({ navigation }) => {
           <View style={styles.transactionsList}>
             {recentTransactions.length > 0 ? (
               recentTransactions.map((transaction, index) => (
-                <TouchableOpacity key={transaction.id || index} style={styles.transactionItem}>
+                <TouchableOpacity 
+                  key={transaction.id || index} 
+                  style={styles.transactionItem}
+                  onLongPress={() => handleDeleteTransaction(transaction.id)}
+                  activeOpacity={0.7}
+                >
                   <View style={styles.transactionIcon}>
                     <MaterialIcons 
                       name={getCategoryIcon(transaction.category_id)} 
@@ -1277,12 +1332,15 @@ const HomeScreen = ({ navigation }) => {
                       {new Date(transaction.date).toLocaleDateString('tr-TR')}
                     </Text>
                   </View>
-                  <Text style={[
-                    styles.transactionAmount,
-                    { color: transaction.type === 'income' ? '#48BB78' : '#F56565' }
-                  ]}>
-                    {transaction.type === 'income' ? '+' : ''}{formatCurrency(transaction.amount)}
-                  </Text>
+                  <View style={styles.transactionRight}>
+                    <Text style={[
+                      styles.transactionAmount,
+                      { color: transaction.type === 'income' ? '#48BB78' : '#F56565' }
+                    ]}>
+                      {transaction.type === 'income' ? '+' : ''}{formatCurrency(transaction.amount)}
+                    </Text>
+                    <Text style={styles.transactionDeleteHint}>Uzun bas → Sil</Text>
+                  </View>
                 </TouchableOpacity>
               ))
             ) : (
@@ -3134,6 +3192,16 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  transactionRight: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  transactionDeleteHint: {
+    fontSize: 10,
+    color: theme.colors.textSecondary,
+    fontWeight: '400',
+    opacity: 0.7,
   },
 });
 

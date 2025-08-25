@@ -1,6 +1,6 @@
 // FinanceFlow - Transactions Screen
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Dimensions, Animated, RefreshControl, TextInput, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Dimensions, Animated, RefreshControl, TextInput, Modal, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -197,6 +197,31 @@ const TransactionsScreen = ({ navigation }) => {
       console.log('✅ Transaction data refreshed');
     } catch (error) {
       console.error('❌ Error handling transaction addition:', error);
+    }
+  };
+
+  // Handle transaction deletion
+  const handleDeleteTransaction = async (transactionId) => {
+    try {
+      Alert.alert(
+        'İşlem Silinsin mi?',
+        'Bu işlem kalıcı olarak silinecek ve bakiye geri düzeltilecek.',
+        [
+          { text: 'İptal', style: 'cancel' },
+          { text: 'Sil', style: 'destructive', onPress: async () => {
+              const result = await transactionService.deleteTransaction(transactionId);
+              if (result.success) {
+                await loadTransactions();
+                await loadAccounts();
+                Alert.alert('Başarılı', 'İşlem silindi');
+              } else {
+                Alert.alert('Hata', result.error?.message || 'İşlem silinemedi');
+              }
+            } }
+        ]
+      );
+    } catch (e) {
+      Alert.alert('Hata', e.message || 'İşlem silinemedi');
     }
   };
 
@@ -401,6 +426,18 @@ const TransactionsScreen = ({ navigation }) => {
             })}
           </Text>
         </View>
+        
+        {/* Silme Butonu */}
+        <TouchableOpacity 
+          style={styles.deleteButton}
+          onPress={() => handleDeleteTransaction(item.id)}
+        >
+          <MaterialIcons 
+            name="delete" 
+            size={20} 
+            color={theme.colors.error} 
+          />
+        </TouchableOpacity>
       </TouchableOpacity>
     );
   };
@@ -1487,6 +1524,16 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  deleteButton: {
+    padding: theme.spacing.sm,
+    marginLeft: theme.spacing.md,
+    backgroundColor: theme.colors.error + '15',
+    borderRadius: theme.borderRadius.sm,
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 
