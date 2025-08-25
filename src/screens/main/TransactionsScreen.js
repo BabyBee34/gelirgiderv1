@@ -6,17 +6,19 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { theme } from '../../styles/theme';
-// Service imports - test için kaldırıldı
-// import transactionService from '../../services/transactionService';
-// import accountService from '../../services/accountService';
-// import categoryService from '../../services/categoryService';
+import transactionService from '../../services/transactionService';
+import accountService from '../../services/accountService';
+import categoryService from '../../services/categoryService';
+import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../utils/formatters';
 import DetailedAddTransactionModal from '../modals/DetailedAddTransactionModal';
 import EmptyState from '../../components/ui/EmptyState';
 
 const TransactionsScreen = ({ navigation }) => {
+  const { user } = useAuth();
+  
   // İlk console log - component başlangıcı
-  console.log('🔍 TransactionsScreen component başladı');
+  console.log('🔍 TransactionsScreen component başladı', { userId: user?.id });
 
   // State variables
   const [transactions, setTransactions] = useState([]);
@@ -67,9 +69,23 @@ const TransactionsScreen = ({ navigation }) => {
     }).start();
   }, []);
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
+    if (!user?.id) return;
+    
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1500);
+    try {
+      console.log('🔄 Refreshing transactions data...');
+      await Promise.all([
+        loadTransactions(),
+        loadAccounts(),
+        loadCategories()
+      ]);
+      console.log('✅ Data refresh completed');
+    } catch (error) {
+      console.error('❌ Error refreshing data:', error);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
 
@@ -78,22 +94,45 @@ const TransactionsScreen = ({ navigation }) => {
 
   // Data yükle
   useEffect(() => {
-    loadCategories();
-    loadTransactions();
-    loadAccounts();
-  }, []);
+    if (user?.id) {
+      console.log('👤 User available, loading data for:', user.id);
+      loadCategories();
+      loadTransactions();
+      loadAccounts();
+    } else {
+      console.log('⚠️ No user available, skipping data load');
+    }
+  }, [user]);
 
   const loadCategories = async () => {
+    if (!user?.id) return;
+    
     try {
       setLoading(true);
-      // if (!services.categoryService) { // Removed service check
-      //   console.error('categoryService is undefined');
-      //   setError('Category service yüklenemedi');
-      //   return;
-      // }
-      // const categoriesData = await services.categoryService.getCategories(); // Removed service call
-      setCategories([]); // Placeholder
-      console.log('Placeholder: Categories loaded');
+      console.log('📋 Loading categories for user:', user.id);
+      
+      const result = await categoryService.getCategories(user.id);
+      if (result.success) {
+        // Categories come as an object with income and expense arrays
+        if (result.data && typeof result.data === 'object') {
+          const allCategories = [
+            ...(result.data.income || []),
+            ...(result.data.expense || [])
+          ];
+          setCategories(allCategories);
+          console.log('✅ Categories loaded:', allCategories.length);
+        } else if (Array.isArray(result.data)) {
+          // Fallback if categories come as a simple array
+          setCategories(result.data);
+          console.log('✅ Categories loaded:', result.data.length);
+        } else {
+          setCategories([]);
+          console.log('⚠️ No categories found');
+        }
+      } else {
+        console.error('❌ Category loading error:', result.error);
+        setError('Kategoriler yüklenirken hata oluştu');
+      }
     } catch (error) {
       console.error('Error loading categories:', error);
       setError('Kategoriler yüklenirken hata oluştu');
@@ -103,16 +142,20 @@ const TransactionsScreen = ({ navigation }) => {
   };
 
   const loadTransactions = async () => {
+    if (!user?.id) return;
+    
     try {
       setLoading(true);
-      // if (!services.transactionService) { // Removed service check
-      //   console.error('transactionService is undefined');
-      //   setError('Transaction service yüklenemedi');
-      //   return;
-      // }
-      // const transactionsData = await services.transactionService.getTransactions(); // Removed service call
-      setTransactions([]); // Placeholder
-      console.log('Placeholder: Transactions loaded');
+      console.log('📋 Loading transactions for user:', user.id);
+      
+      const result = await transactionService.getTransactions(user.id);
+      if (result.success) {
+        setTransactions(result.data || []);
+        console.log('✅ Transactions loaded:', result.data?.length || 0);
+      } else {
+        console.error('❌ Transaction loading error:', result.error);
+        setError('İşlemler yüklenirken hata oluştu');
+      }
     } catch (error) {
       console.error('Error loading transactions:', error);
       setError('İşlemler yüklenirken hata oluştu');
@@ -122,26 +165,65 @@ const TransactionsScreen = ({ navigation }) => {
   };
 
   const loadAccounts = async () => {
+    if (!user?.id) return;
+    
     try {
-      // if (!services.accountService) { // Removed service check
-      //   console.error('accountService is undefined');
-      //   return;
-      // }
-      // const accountsData = await services.accountService.getAccounts(); // Removed service call
-      setAccounts([]); // Placeholder
-      console.log('Placeholder: Accounts loaded');
+      console.log('📋 Loading accounts for user:', user.id);
+      
+      const result = await accountService.getAccounts(user.id);
+      if (result.success) {
+        setAccounts(result.data || []);
+        console.log('✅ Accounts loaded:', result.data?.length || 0);
+      } else {
+        console.error('❌ Account loading error:', result.error);
+      }
     } catch (error) {
       console.error('Error loading accounts:', error);
     }
   };
 
-  const getCategoryInfo = (categoryId) => {
-    if (!categories || categories.length === 0) {
-      return { name: 'Kategori', icon: 'category', color: '#718096' };
+  // Handle transaction added/updated
+  const handleTransactionAdded = async (newTransaction) => {
+    try {
+      console.log('🎉 Transaction added, refreshing data...', newTransaction);
+      
+      // Add the new transaction to the list immediately
+      setTransactions(prev => [newTransaction, ...prev]);
+      
+      // Then refresh all data to ensure consistency
+      await loadTransactions();
+      await loadAccounts();
+      
+      console.log('✅ Transaction data refreshed');
+    } catch (error) {
+      console.error('❌ Error handling transaction addition:', error);
+    }
+  };
+
+  const getCategoryInfo = (transaction) => {
+    // First try to get category from transaction.category (joined data)
+    if (transaction.category) {
+      return {
+        name: transaction.category.name || 'Kategori',
+        icon: transaction.category.icon || 'category',
+        color: transaction.category.color || '#718096'
+      };
     }
     
-    const category = categories.find(cat => cat.id === categoryId);
-    return category || { name: 'Kategori', icon: 'category', color: '#718096' };
+    // Fallback to searching in categories array using category_id
+    if (categories && categories.length > 0 && transaction.category_id) {
+      const category = categories.find(cat => cat.id === transaction.category_id);
+      if (category) {
+        return {
+          name: category.name || 'Kategori',
+          icon: category.icon || 'category',
+          color: category.color || '#718096'
+        };
+      }
+    }
+    
+    // Default fallback
+    return { name: 'Kategori', icon: 'category', color: '#718096' };
   };
 
   const getFilteredTransactions = () => {
@@ -160,9 +242,9 @@ const TransactionsScreen = ({ navigation }) => {
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim();
       filtered = filtered.filter(transaction => {
-        const category = getCategoryInfo(transaction.categoryId);
+        const category = getCategoryInfo(transaction);
         return (
-          transaction.description.toLowerCase().includes(query) ||
+          (transaction.description && transaction.description.toLowerCase().includes(query)) ||
           category.name.toLowerCase().includes(query) ||
           (transaction.tags && transaction.tags.some(tag => tag.toLowerCase().includes(query)))
         );
@@ -270,8 +352,8 @@ const TransactionsScreen = ({ navigation }) => {
   };
 
   const renderTransactionItem = ({ item }) => {
-    const category = getCategoryInfo(item.categoryId);
-    const account = accounts.find(acc => acc.id === item.accountId);
+    const category = getCategoryInfo(item);
+    const account = accounts.find(acc => acc.id === item.account_id) || item.account;
     
     return (
       <TouchableOpacity style={styles.transactionItem}>
@@ -284,7 +366,7 @@ const TransactionsScreen = ({ navigation }) => {
         </View>
         
         <View style={styles.transactionDetails}>
-          <Text style={styles.transactionTitle}>{item.description}</Text>
+          <Text style={styles.transactionTitle}>{item.description || 'İşlem'}</Text>
           <View style={styles.transactionMeta}>
             <Text style={styles.transactionCategory}>{category.name}</Text>
             {account && (
@@ -608,6 +690,7 @@ const TransactionsScreen = ({ navigation }) => {
         visible={addTransactionVisible}
         onClose={() => setAddTransactionVisible(false)}
         type={transactionType}
+        onTransactionAdded={handleTransactionAdded}
       />
       
       {/* Date Filter Modal */}

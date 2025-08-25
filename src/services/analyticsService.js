@@ -485,7 +485,9 @@ class AnalyticsService {
         title: 'Tasarruf Oranı Düşük',
         message: `Tasarruf oranınız %${summary.savingsRate.toFixed(1)}. %20'nin üzerine çıkarmayı hedefleyin.`,
         icon: 'trending-down',
-        priority: 'high'
+        priority: 'high',
+        actionText: 'Bütçe Planı Oluştur',
+        onAction: () => console.log('Navigate to budget planning')
       });
     } else if (summary.savingsRate > 50) {
       insights.push({
@@ -506,10 +508,12 @@ class AnalyticsService {
       if (percentage > 40) {
         insights.push({
           type: 'warning',
-          title: 'Kategori Konsantrasyonu',
-          message: `${topCategory.name} kategorisinde harcamalarınız toplam giderlerinizin %${percentage.toFixed(1)}'ini oluşturuyor.`,
+          title: `${topCategory.name} Kategorisinde Yüksek Harcama`,
+          message: `Toplam harcamanızın %${percentage.toFixed(1)}'i ${topCategory.name} kategorisinde. Bu kategoriyi gözden geçirmeyi düşünün.`,
           icon: 'warning',
-          priority: 'medium'
+          priority: 'medium',
+          actionText: 'Kategori Detaylarını Gör',
+          onAction: () => console.log('Navigate to category details')
         });
       }
     }
@@ -518,33 +522,26 @@ class AnalyticsService {
     if (summary.net < 0) {
       insights.push({
         type: 'danger',
-        title: 'Gelir-Gider Dengesi',
-        message: 'Giderleriniz gelirlerinizi aşıyor. Harcamalarınızı gözden geçirmenizi öneririz.',
-        icon: 'error',
-        priority: 'high'
+        title: 'Negatif Nakit Akışı',
+        message: `Bu dönemde ${Math.abs(summary.net).toLocaleString('tr-TR')} TL zarar ettiniz. Harcamalarınızı gözden geçirin.`,
+        icon: 'trending-down',
+        priority: 'high',
+        actionText: 'Harcama Analizi Yap',
+        onAction: () => console.log('Navigate to expense analysis')
       });
     }
 
-    // Pozitif trend
-    if (summary.net > 0 && summary.savingsRate > 30) {
-      insights.push({
-        type: 'success',
-        title: 'Pozitif Finansal Trend',
-        message: 'Finansal durumunuz iyi gidiyor. Bu trendi sürdürmeye devam edin.',
-        icon: 'check-circle',
-        priority: 'low'
-      });
-    }
-
-    return insights;
+    return insights.sort((a, b) => {
+      const priorityOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+      return priorityOrder[b.priority] - priorityOrder[a.priority];
+    });
   }
 
-  // Dashboard için özet veriler (with real-time updates)
-  async getDashboardData(userId, forceRefresh = false) {
+  // Harcama desenlerini analiz et
+  async getSpendingPatterns(userId, period = 'month', forceRefresh = false) {
     try {
-      const cacheKey = `dashboard_${userId}`;
+      const cacheKey = `spending_patterns_${userId}_${period}`;
       
-      // Check cache first (unless force refresh)
       if (!forceRefresh) {
         const cached = await this.getCachedData(cacheKey);
         if (cached && this.isCacheValid(cached.timestamp)) {
@@ -552,40 +549,257 @@ class AnalyticsService {
         }
       }
 
-      const [summary, topExpenses, topIncome, insights] = await Promise.all([
-        this.getFinancialSummary(userId, 'month'),
-        this.getCategoryAnalysis(userId, 'month', 'expense'),
-        this.getCategoryAnalysis(userId, 'month', 'income'),
-        this.getInsights(userId, 'month')
-      ]);
-
-      if (!summary.success || !topExpenses.success || !topIncome.success || !insights.success) {
-        throw new Error('Dashboard veri getirme hatası');
-      }
-
-      const dashboardData = {
-        summary: summary.data,
-        topExpenses: topExpenses.data.slice(0, 5),
-        topIncome: topIncome.data.slice(0, 5),
-        insights: insights.data.slice(0, 3),
-        lastUpdated: new Date().toISOString()
-      };
+      const startDate = this.getStartDate(period);
       
-      // Cache the result
-      await this.cacheData(cacheKey, dashboardData);
+      const { data, error } = await this.supabase
+        .from(TABLES.TRANSACTIONS)
+        .select('amount, date, type')
+        .eq('user_id', userId)
+        .gte('date', startDate.toISOString())
+        .order('date', { ascending: true });
+
+      if (error) throw error;
+
+      const patterns = this.analyzeSpendingPatterns(data);
       
-      return { success: true, data: dashboardData };
+      await this.cacheData(cacheKey, patterns);
+      
+      return { success: true, data: patterns };
     } catch (error) {
-      console.error('Get dashboard data error:', error);
-      return { success: false, error: 'Dashboard Veri Getirme Hatası' };
+      console.error('Get spending patterns error:', error);
+      return { success: false, error: 'Harcama Desenleri Analizi Hatası' };
     }
   }
 
-  // Cache management methods - Mock implementation
+  // Harcama desenlerini analiz et
+  analyzeSpendingPatterns(transactions) {
+    const patterns = [];
+    
+    // Haftalık ortalama
+    const weeklyAvg = this.calculateWeeklyAverage(transactions);
+    patterns.push({
+      title: 'Haftalık Ortalama',
+      description: 'Son haftalık harcama ortalamanız',
+      value: `${weeklyAvg.toLocaleString('tr-TR')} TL`,
+      trend: weeklyAvg > 1000 ? '↗️ Yüksek' : '↘️ Normal',
+      icon: 'timeline'
+    });
+    
+    // En aktif gün
+    const activeDays = this.findMostActiveDay(transactions);
+    patterns.push({
+      title: 'En Aktif Gün',
+      description: 'En çok harcama yaptığınız gün',
+      value: activeDays.day,
+      trend: `${activeDays.count} işlem`,
+      icon: 'today'
+    });
+    
+    // Harcama volatilitesi
+    const volatility = this.calculateVolatility(transactions);
+    patterns.push({
+      title: 'Harcama Tutarlılığı',
+      description: 'Harcamalarınızın düzenli olma seviyesi',
+      value: volatility.level,
+      trend: volatility.score,
+      icon: 'show-chart'
+    });
+    
+    return patterns;
+  }
+
+  // Bütçe önerilerini getir
+  async getBudgetRecommendations(userId, period = 'month', forceRefresh = false) {
+    try {
+      const cacheKey = `budget_recommendations_${userId}_${period}`;
+      
+      if (!forceRefresh) {
+        const cached = await this.getCachedData(cacheKey);
+        if (cached && this.isCacheValid(cached.timestamp)) {
+          return { success: true, data: cached.data, fromCache: true };
+        }
+      }
+
+      const [summaryResult, categoryResult] = await Promise.all([
+        this.getFinancialSummary(userId, period),
+        this.getCategoryAnalysis(userId, period, 'expense')
+      ]);
+
+      if (!summaryResult.success || !categoryResult.success) {
+        throw new Error('Veri getirme hatası');
+      }
+
+      const recommendations = this.generateBudgetRecommendations(
+        summaryResult.data, 
+        categoryResult.data
+      );
+      
+      await this.cacheData(cacheKey, recommendations);
+      
+      return { success: true, data: recommendations };
+    } catch (error) {
+      console.error('Get budget recommendations error:', error);
+      return { success: false, error: 'Bütçe Önerileri Getirme Hatası' };
+    }
+  }
+
+  // Bütçe önerilerini oluştur
+  generateBudgetRecommendations(summary, categories) {
+    const recommendations = [];
+    const monthlyIncome = summary.income;
+    
+    // 50/30/20 kuralına göre öneriler
+    const needsBudget = monthlyIncome * 0.5;  // İhtiyaçlar için %50
+    const wantsBudget = monthlyIncome * 0.3;  // İstekler için %30
+    const savingsBudget = monthlyIncome * 0.2; // Tasarruf için %20
+    
+    categories.forEach((category, index) => {
+      let suggestedAmount, currentPercentage, recommendation;
+      
+      // Kategori bazında öneriler
+      if (category.name.toLowerCase().includes('market') || 
+          category.name.toLowerCase().includes('gıda')) {
+        suggestedAmount = monthlyIncome * 0.15; // Gıda için %15
+        recommendation = 'Gıda harcamalarınız için önerilen bütçe';
+      } else if (category.name.toLowerCase().includes('ulaşım')) {
+        suggestedAmount = monthlyIncome * 0.10; // Ulaşım için %10
+        recommendation = 'Ulaşım harcamalarınız için önerilen bütçe';
+      } else if (category.name.toLowerCase().includes('eğlence')) {
+        suggestedAmount = monthlyIncome * 0.05; // Eğlence için %5
+        recommendation = 'Eğlence harcamalarınız için önerilen bütçe';
+      } else {
+        suggestedAmount = monthlyIncome * 0.08; // Diğer kategoriler için %8
+        recommendation = `${category.name} kategorisi için önerilen bütçe`;
+      }
+      
+      currentPercentage = (category.amount / suggestedAmount) * 100;
+      
+      recommendations.push({
+        category: category.name,
+        currentAmount: category.amount,
+        suggestedAmount,
+        currentPercentage,
+        recommendation,
+        icon: category.icon || 'account-balance-wallet',
+        color: currentPercentage > 100 ? '#F56565' : '#48BB78'
+      });
+    });
+    
+    return recommendations.slice(0, 5); // En önemli 5 kategori
+  }
+
+  // Akıllı uyarıları getir
+  async getSmartAlerts(userId, forceRefresh = false) {
+    try {
+      const cacheKey = `smart_alerts_${userId}`;
+      
+      if (!forceRefresh) {
+        const cached = await this.getCachedData(cacheKey);
+        if (cached && this.isCacheValid(cached.timestamp, 60)) { // 1 saatlik cache
+          return { success: true, data: cached.data, fromCache: true };
+        }
+      }
+
+      const alerts = [];
+      
+      // Son 24 saatte büyük harcama kontrolü
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const { data: recentTransactions } = await this.supabase
+        .from(TABLES.TRANSACTIONS)
+        .select('amount')
+        .eq('user_id', userId)
+        .eq('type', 'expense')
+        .gte('date', yesterday.toISOString());
+        
+      const dailySpending = recentTransactions?.reduce((sum, t) => sum + parseFloat(t.amount), 0) || 0;
+      
+      if (dailySpending > 500) {
+        alerts.push({
+          message: `Son 24 saatte ${dailySpending.toLocaleString('tr-TR')} TL harcama yaptınız!`,
+          severity: 'high',
+          icon: 'warning',
+          timestamp: new Date()
+        });
+      }
+      
+      // Ay sonu yaklaşırken bütçe durumu
+      const now = new Date();
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const daysLeft = Math.ceil((monthEnd - now) / (1000 * 60 * 60 * 24));
+      
+      if (daysLeft <= 5) {
+        alerts.push({
+          message: `Ay sonuna ${daysLeft} gün kaldı. Bütçenizi kontrol edin.`,
+          severity: 'medium',
+          icon: 'schedule',
+          timestamp: new Date()
+        });
+      }
+      
+      await this.cacheData(cacheKey, alerts);
+      
+      return { success: true, data: alerts };
+    } catch (error) {
+      console.error('Get smart alerts error:', error);
+      return { success: false, error: 'Akıllı Uyarılar Getirme Hatası' };
+    }
+  }
+
+  // Yardımcı fonksiyonlar
+  calculateWeeklyAverage(transactions) {
+    const expenseTransactions = transactions.filter(t => t.type === 'expense');
+    const totalExpenses = expenseTransactions.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+    const weekCount = Math.max(1, expenseTransactions.length / 7);
+    return totalExpenses / weekCount;
+  }
+
+  findMostActiveDay(transactions) {
+    const dayCount = {};
+    const dayNames = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+    
+    transactions.forEach(t => {
+      const day = new Date(t.date).getDay();
+      const dayName = dayNames[day];
+      dayCount[dayName] = (dayCount[dayName] || 0) + 1;
+    });
+    
+    const mostActiveDay = Object.entries(dayCount)
+      .sort(([,a], [,b]) => b - a)[0];
+    
+    return {
+      day: mostActiveDay ? mostActiveDay[0] : 'Bilinmiyor',
+      count: mostActiveDay ? mostActiveDay[1] : 0
+    };
+  }
+
+  calculateVolatility(transactions) {
+    const amounts = transactions
+      .filter(t => t.type === 'expense')
+      .map(t => parseFloat(t.amount));
+    
+    if (amounts.length < 2) {
+      return { level: 'Yetersiz Veri', score: 'N/A' };
+    }
+    
+    const mean = amounts.reduce((sum, amount) => sum + amount, 0) / amounts.length;
+    const variance = amounts.reduce((sum, amount) => sum + Math.pow(amount - mean, 2), 0) / amounts.length;
+    const standardDeviation = Math.sqrt(variance);
+    const volatility = (standardDeviation / mean) * 100;
+    
+    if (volatility < 20) {
+      return { level: 'Tutarlı', score: `%${volatility.toFixed(0)}` };
+    } else if (volatility < 50) {
+      return { level: 'Orta', score: `%${volatility.toFixed(0)}` };
+    } else {
+      return { level: 'Değişken', score: `%${volatility.toFixed(0)}` };
+    }
+  }
+
+  // Cache management
   async getCachedData(key) {
     try {
-      // Mock cache - her zaman null döndür
-      return null;
+      // Simple in-memory cache for demo
+      return this.cache ? this.cache[key] : null;
     } catch (error) {
       console.error('Get cached data error:', error);
       return null;
@@ -594,53 +808,31 @@ class AnalyticsService {
 
   async cacheData(key, data) {
     try {
-      // Mock cache - hiçbir şey yapma
-      console.log('Mock cache data:', key);
+      if (!this.cache) {
+        this.cache = {};
+      }
+      this.cache[key] = {
+        data,
+        timestamp: new Date()
+      };
     } catch (error) {
       console.error('Cache data error:', error);
     }
   }
 
-  isCacheValid(timestamp) {
-    // Mock cache validation - her zaman false döndür
-    return false;
+  isCacheValid(timestamp, maxAgeMinutes = 15) {
+    const now = new Date();
+    const cacheAge = (now - new Date(timestamp)) / (1000 * 60); // minutes
+    return cacheAge < maxAgeMinutes;
   }
 
-  // Clear all cache
   async clearCache() {
     try {
-      // Mock cache clear - her zaman başarılı
-      return { success: true, message: 'Mock cache temizlendi' };
+      this.cache = {};
+      return { success: true };
     } catch (error) {
       console.error('Clear cache error:', error);
-      return { success: false, error: 'Cache temizlenemedi' };
-    }
-  }
-
-  // Force refresh all data
-  async forceRefreshAll(userId) {
-    try {
-      const [summary, topExpenses, topIncome, insights, dashboard] = await Promise.all([
-        this.getFinancialSummary(userId, 'month', true),
-        this.getCategoryAnalysis(userId, 'month', 'expense', true),
-        this.getCategoryAnalysis(userId, 'month', 'income', true),
-        this.getInsights(userId, 'month', true),
-        this.getDashboardData(userId, true)
-      ]);
-
-      return {
-        success: true,
-        data: {
-          summary: summary.data,
-          topExpenses: topExpenses.data,
-          topIncome: topIncome.data,
-          insights: insights.data,
-          dashboard: dashboard.data
-        }
-      };
-    } catch (error) {
-      console.error('Force refresh all error:', error);
-      return { success: false, error: 'Veri yenileme hatası' };
+      return { success: false, error: 'Cache temizleme hatası' };
     }
   }
 }

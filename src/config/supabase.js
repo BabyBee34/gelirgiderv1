@@ -119,8 +119,7 @@ export const TABLES = {
   BUDGETS: 'budgets',
   GOALS: 'goals',
   CREDIT_CARDS: 'credit_cards',
-  RECURRING_TRANSACTIONS: 'recurring_transactions',
-  CARDS: 'credit_cards', // Eski service'ler için alias
+  CARDS: 'credit_cards', // Alias for consistency
   NOTIFICATIONS: 'notifications',
   CURRENCY_RATES: 'currency_rates',
   GOLD_PRICES: 'gold_prices',

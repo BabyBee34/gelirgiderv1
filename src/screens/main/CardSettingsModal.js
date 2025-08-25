@@ -1,5 +1,5 @@
 // FinanceFlow - Card Settings Modal
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Dimensions, TextInput, Alert, Platform, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,13 +19,16 @@ const CardSettingsModal = ({ visible, onClose, selectedAccount, onUpdateAccount,
   const [statementTempDate, setStatementTempDate] = useState(new Date());
   const [dueTempDate, setDueTempDate] = useState(new Date());
 
-  if (!selectedAccount) return null;
-
   // Reset edited account when selectedAccount changes
-  React.useEffect(() => {
-    setEditedAccount(selectedAccount);
-    setEditMode(false);
+  useEffect(() => {
+    if (selectedAccount) {
+      setEditedAccount(selectedAccount);
+      setEditMode(false);
+    }
   }, [selectedAccount]);
+
+  // Early return must come AFTER all hooks
+  if (!selectedAccount) return null;
 
   const isCredit = selectedAccount.type === 'credit';
   const creditLimit = selectedAccount.creditLimit || 20000;

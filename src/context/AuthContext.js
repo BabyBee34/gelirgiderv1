@@ -1,6 +1,7 @@
-// FinanceFlow - Authentication Context Provider
+// FinanceFlow - Authentication Context Provider with Professional Services Integration
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../config/supabase';
+import serviceManager from '../services/serviceManager';
 
 // Context oluşturma
 const AuthContext = createContext();
@@ -207,6 +208,14 @@ export const AuthProvider = ({ children }) => {
         if (profile) {
           setUserProfile(profile);
         }
+        
+        // Professional services integration - Handle user login
+        try {
+          await serviceManager.handleUserLogin(data.user);
+          console.log('✅ Professional services notified of user login');
+        } catch (serviceError) {
+          console.warn('⚠️ Service manager login notification failed:', serviceError);
+        }
       }
 
       return { success: true, data };
@@ -236,6 +245,15 @@ export const AuthProvider = ({ children }) => {
   const signOut = async () => {
     try {
       setLoading(true);
+      
+      // Professional services integration - Handle user logout
+      try {
+        await serviceManager.handleUserLogout();
+        console.log('✅ Professional services notified of user logout');
+      } catch (serviceError) {
+        console.warn('⚠️ Service manager logout notification failed:', serviceError);
+      }
+      
       const { error } = await supabase.auth.signOut();
       
       if (error) {

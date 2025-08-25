@@ -2,35 +2,12 @@
 // Renk paleti ve design tokens
 import responsive from './responsive';
 
-export const theme = {
-  colors: {
-    // Ana renk paleti (proje.md'den aynen alındı)
-    primary: '#6C63FF',      // Soft Purple
-    secondary: '#4ECDC4',    // Mint Green
-    accent: '#FFE66D',       // Soft Yellow
-    background: '#F8F9FA',   // Light Gray
-    cards: '#FFFFFF',        // Pure White
+// Base theme structure (without colors)
+export const createTheme = (colors) => {
+  return {
+    colors,
     
-    // Text renkler
-    textPrimary: '#2D3748',   // Dark Gray
-    textSecondary: '#718096', // Medium Gray
-    
-    // Status renkler
-    success: '#48BB78',       // Green
-    warning: '#ED8936',       // Orange
-    error: '#F56565',         // Red
-    
-    // Border rengi
-    border: '#E2E8F0',       // Light Gray Border
-    
-    // Gradients
-    primaryGradient: ['#6C63FF', '#4ECDC4'],
-    backgroundGradient: ['#6C63FF', '#4ECDC4'],
-  },
-  
-
-  
-  // Responsive layout
+    // Responsive layout
   layout: {
     headerHeight: responsive.responsiveLayout.headerHeight,
     tabBarHeight: responsive.responsiveLayout.tabBarHeight,
@@ -182,16 +159,17 @@ export const theme = {
     },
   },
   
-  // Animation timings
-  animations: {
-    fast: 200,
-    normal: 300,
-    slow: 500,
-  },
+    // Animation timings
+    animations: {
+      fast: 200,
+      normal: 300,
+      slow: 500,
+    },
+  };
 };
 
 // Utility functions for theme
-export const getColor = (colorPath) => {
+export const getColor = (colorPath, theme) => {
   const paths = colorPath.split('.');
   let color = theme.colors;
   
@@ -202,5 +180,38 @@ export const getColor = (colorPath) => {
   return color;
 };
 
-export const getSpacing = (size) => theme.spacing[size] || size;
-export const getBorderRadius = (size) => theme.borderRadius[size] || size;
+export const getSpacing = (size, theme) => theme.spacing[size] || size;
+export const getBorderRadius = (size, theme) => theme.borderRadius[size] || size;
+
+// Default light theme for backwards compatibility
+export const theme = createTheme({
+  // Ana renk paleti (proje.md'den aynen alındı)
+  primary: '#6C63FF',      // Soft Purple
+  secondary: '#4ECDC4',    // Mint Green
+  accent: '#FFE66D',       // Soft Yellow
+  background: '#F8F9FA',   // Light Gray
+  cards: '#FFFFFF',        // Pure White
+  
+  // Text renkler
+  textPrimary: '#2D3748',   // Dark Gray
+  textSecondary: '#718096', // Medium Gray
+  
+  // Status renkler
+  success: '#48BB78',       // Green
+  warning: '#ED8936',       // Orange
+  error: '#F56565',         // Red
+  
+  // Border rengi
+  border: '#E2E8F0',       // Light Gray Border
+  
+  // Gradients
+  primaryGradient: ['#6C63FF', '#4ECDC4'],
+  backgroundGradient: ['#6C63FF', '#4ECDC4'],
+  
+  // Interface elements
+  surface: '#FFFFFF',
+  overlay: 'rgba(0, 0, 0, 0.5)',
+  ripple: 'rgba(108, 99, 255, 0.12)',
+  disabled: '#A0AEC0',
+  placeholder: '#CBD5E0',
+});

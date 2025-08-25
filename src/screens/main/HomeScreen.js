@@ -1,6 +1,6 @@
 // FinanceFlow - Home Screen
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, RefreshControl, Modal, Switch } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, RefreshControl, Modal, Switch, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -29,12 +29,27 @@ import { testSupabaseConnection, testAllConnections } from '../../config/supabas
 import goalService from '../../services/goalService';
 import budgetService from '../../services/budgetService';
 import recurringTransactionService from '../../services/recurringTransactionService';
+import serviceManager from '../../services/serviceManager';
+import ServiceStatusModal from '../../components/ServiceStatusModal';
+import dataSyncService from '../../services/dataSyncService';
 
 const { width, height } = Dimensions.get('window');
-// Kart genişliği - tam ekran genişlik
-const CARD_WIDTH = theme.screen.isSmall ? width - 32 : theme.screen.isMedium ? width - 40 : width - 48;
-const CARD_GAP = theme.spacing.md;
-const TOTAL_CARD_WIDTH = CARD_WIDTH + CARD_GAP;
+// Improved card width calculations for better centering and responsiveness
+const HORIZONTAL_PADDING = theme.spacing.lg; // Consistent padding
+const CARD_SPACING = theme.spacing.md; // Space between cards
+
+// Responsive card width based on screen size
+const getResponsiveCardWidth = () => {
+  if (width < 375) { // Small screens (iPhone SE, etc.)
+    return width - (HORIZONTAL_PADDING * 1.5);
+  } else if (width > 414) { // Large screens (Plus, Max models)
+    return width - (HORIZONTAL_PADDING * 2.5);
+  }
+  return width - (HORIZONTAL_PADDING * 2); // Standard screens
+};
+
+const CARD_WIDTH = getResponsiveCardWidth();
+const SNAP_INTERVAL = CARD_WIDTH + CARD_SPACING; // Include spacing for snap
 
 const HomeScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -47,6 +62,16 @@ const HomeScreen = ({ navigation }) => {
   const [fabMenuVisible, setFabMenuVisible] = useState(false);
   const [balanceSettingsVisible, setBalanceSettingsVisible] = useState(false);
   const [assetsSettingsVisible, setAssetsSettingsVisible] = useState(false);
+  const [assetsBreakdownVisible, setAssetsBreakdownVisible] = useState(false); // Yeni eklenen
+  const [notificationsVisible, setNotificationsVisible] = useState(false); // Bildirimler modal'ı
+  const [pendingConfirmations, setPendingConfirmations] = useState([]); // Bekleyen onaylar
+  const [userSettings, setUserSettings] = useState(null); // Kullanıcı ayarları
+  
+  // Professional services integration
+  const [notificationCount, setNotificationCount] = useState(0);
+  const [servicesHealth, setServicesHealth] = useState('checking');
+  const [lastSystemCheck, setLastSystemCheck] = useState(null);
+  const [serviceStatusVisible, setServiceStatusVisible] = useState(false);
   
   // Toplam Bakiye için ayarlar
   const [includeCashAccounts, setIncludeCashAccounts] = useState(true);
@@ -65,33 +90,33 @@ const HomeScreen = ({ navigation }) => {
   const [categories, setCategories] = useState({ income: [], expense: [] });
   const [goals, setGoals] = useState([]);
   const [budgets, setBudgets] = useState([]);
+  const [recurringTransactions, setRecurringTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
   const horizontalScrollRef = useRef(null);
 
-  // Gerçek Supabase verilerini kullan
-  const [userData, setUserData] = useState(null);
-
   const getCashAccountsTotal = () => {
     if (!accounts || accounts.length === 0) return 0;
-    return accounts
-      .filter(a => a.type === 'bank' || a.type === 'cash')
-      .reduce((sum, a) => sum + (parseFloat(a.balance) || 0), 0);
+    // Sadece ana hesabın bakiyesini döndür
+    const primaryAccount = accounts.find(a => a.is_primary === true);
+    return primaryAccount ? parseFloat(primaryAccount.balance || 0) : 0;
   };
 
   const getSavingsTotal = () => {
     if (!accounts || accounts.length === 0) return 0;
+    // Ana hesap hariç tüm hesapların toplamı
     return accounts
-      .filter(a => a.type === 'investment')
+      .filter(a => a.is_primary !== true && (a.type === 'bank' || a.type === 'cash' || a.type === 'investment'))
       .reduce((sum, a) => sum + (parseFloat(a.balance) || 0), 0);
   };
 
   const getCreditAvailableTotal = () => {
     if (!accounts || accounts.length === 0) return 0;
+    // Ana hesap hariç kredi kartlarının kullanılabilir limitlerini hesapla
     return accounts
-      .filter(a => a.type === 'credit_card' && typeof a.credit_limit === 'number')
+      .filter(a => a.is_primary !== true && a.type === 'credit_card' && typeof a.credit_limit === 'number')
       .reduce((sum, a) => sum + (parseFloat(a.credit_limit) || 0), 0);
   };
 
@@ -105,6 +130,8 @@ const HomeScreen = ({ navigation }) => {
   useEffect(() => {
     if (user) {
       loadAllData();
+      initializeProfessionalFeatures();
+      setupRealtimeSync();
     }
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -118,7 +145,163 @@ const HomeScreen = ({ navigation }) => {
         useNativeDriver: true,
       }),
     ]).start();
+
+    // Cleanup on unmount
+    return () => {
+      cleanupRealtimeSync();
+    };
   }, [user]);
+
+  // Setup real-time data synchronization
+  const setupRealtimeSync = async () => {
+    try {
+      if (!user?.id) return;
+      
+      // Initialize data sync service
+      const syncInitialized = await dataSyncService.initialize(user.id);
+      if (!syncInitialized) {
+        console.warn('Data sync service failed to initialize');
+        return;
+      }
+      
+      // Register callbacks for different data types
+      dataSyncService.onDataUpdate('transaction', handleTransactionUpdate);
+      dataSyncService.onDataUpdate('account', handleAccountUpdate);
+      dataSyncService.onDataUpdate('account_balance', handleAccountBalanceUpdate);
+      dataSyncService.onDataUpdate('category', handleCategoryUpdate);
+      
+      console.log('✓ Real-time data sync setup complete');
+    } catch (error) {
+      console.error('Failed to setup real-time sync:', error);
+    }
+  };
+
+  // Cleanup real-time synchronization
+  const cleanupRealtimeSync = () => {
+    try {
+      dataSyncService.cleanup();
+      console.log('✓ Real-time sync cleaned up');
+    } catch (error) {
+      console.error('Error cleaning up real-time sync:', error);
+    }
+  };
+
+  // Handle real-time transaction updates
+  const handleTransactionUpdate = (updateData) => {
+    const { type, data } = updateData;
+    console.log('Real-time transaction update:', { type, data });
+    
+    if (type === 'INSERT') {
+      // Add new transaction to state
+      setTransactions(prev => [data, ...prev]);
+    } else if (type === 'UPDATE') {
+      // Update existing transaction
+      setTransactions(prev => 
+        prev.map(transaction => 
+          transaction.id === data.id ? data : transaction
+        )
+      );
+    } else if (type === 'DELETE') {
+      // Remove deleted transaction
+      setTransactions(prev => 
+        prev.filter(transaction => transaction.id !== data.id)
+      );
+    }
+  };
+
+  // Handle real-time account updates
+  const handleAccountUpdate = (updateData) => {
+    const { type, data } = updateData;
+    console.log('Real-time account update:', { type, data });
+    
+    if (type === 'INSERT') {
+      setAccounts(prev => [data, ...prev]);
+    } else if (type === 'UPDATE') {
+      setAccounts(prev => 
+        prev.map(account => 
+          account.id === data.id ? data : account
+        )
+      );
+    } else if (type === 'DELETE') {
+      setAccounts(prev => 
+        prev.filter(account => account.id !== data.id)
+      );
+    }
+  };
+
+  // Handle real-time account balance updates
+  const handleAccountBalanceUpdate = (updateData) => {
+    console.log('Real-time balance update:', updateData);
+    
+    // Refresh accounts to get updated balances
+    if (user?.id) {
+      loadAccounts();
+    }
+  };
+
+  // Handle real-time category updates
+  const handleCategoryUpdate = (updateData) => {
+    const { type, data } = updateData;
+    console.log('Real-time category update:', { type, data });
+    
+    // Reload categories
+    if (user?.id) {
+      loadCategories();
+    }
+  };
+
+  // Load categories function
+  const loadCategories = async () => {
+    if (!user) return;
+    
+    try {
+      const result = await categoryService.getCategories(user.id);
+      if (result.success) {
+        const incomeCats = result.data.filter(cat => cat.type === 'income');
+        const expenseCats = result.data.filter(cat => cat.type === 'expense');
+        setCategories({ income: incomeCats, expense: expenseCats });
+      }
+    } catch (error) {
+      console.error('Error loading categories:', error);
+    }
+  };
+
+  // Initialize professional features
+  const initializeProfessionalFeatures = async () => {
+    try {
+      // Check services health
+      const healthStatus = await serviceManager.getHealthStatus();
+      setServicesHealth(healthStatus.overall);
+      setLastSystemCheck(new Date());
+
+      // Get notification count from professional service
+      const notificationService = serviceManager.getService('notification');
+      if (notificationService) {
+        // Mock notification count - in real app this would come from service
+        setNotificationCount(2);
+      }
+
+      // Track screen view
+      const monitoringService = serviceManager.getService('monitoring');
+      if (monitoringService) {
+        await monitoringService.trackScreenView('HomeScreen');
+      }
+
+      // Add breadcrumb for error tracking
+      const errorService = serviceManager.getService('errorHandling');
+      if (errorService) {
+        await errorService.addBreadcrumb('home_screen_loaded', {
+          userId: user?.id,
+          timestamp: Date.now()
+        });
+      }
+
+      console.log('✅ Professional features initialized on HomeScreen');
+    } catch (error) {
+      console.warn('⚠️ Professional features initialization failed:', error);
+      setServicesHealth('error');
+    }
+  };
 
   // Tüm verileri yükle
   const loadAllData = async () => {
@@ -128,6 +311,7 @@ const HomeScreen = ({ navigation }) => {
       setLoading(true);
       setError(null);
       
+      // Load data in parallel for better performance
       const [transactionsResult, accountsResult, categoriesResult, recurringResult] = await Promise.all([
         transactionService.getTransactions(user.id),
         accountService.getAccounts(user.id),
@@ -138,108 +322,109 @@ const HomeScreen = ({ navigation }) => {
       if (transactionsResult.success) {
         setTransactions(transactionsResult.data || []);
       } else {
-        console.error('Load transactions error:', transactionsResult.error);
-        setTransactions([]);
+        console.error('Transactions loading error:', transactionsResult.error);
       }
 
       if (accountsResult.success) {
         setAccounts(accountsResult.data || []);
+        
+        // Ensure primary account exists
+        await ensurePrimaryAccount(user.id, accountsResult.data);
       } else {
-        console.error('Load accounts error:', accountsResult.error);
-        setAccounts([]);
+        console.error('Accounts loading error:', accountsResult.error);
+        setError('Hesaplar yüklenirken hata oluştu');
       }
 
       if (categoriesResult.success) {
-        const incomeCats = categoriesResult.data.filter(cat => cat.type === 'income');
-        const expenseCats = categoriesResult.data.filter(cat => cat.type === 'expense');
-        setCategories({ income: incomeCats, expense: expenseCats });
+        setCategories(categoriesResult.data || { income: [], expense: [] });
       } else {
-        console.error('Load categories error:', categoriesResult.error);
-        setCategories({ income: [], expense: [] });
+        console.error('Categories loading error:', categoriesResult.error);
       }
 
-      // userData'yı güncelle
-      setUserData({
-        user: { 
-          firstName: user?.user_metadata?.firstName || 'Kullanıcı', 
-          lastName: user?.user_metadata?.lastName || '' 
-        },
-        accounts: accountsResult.success ? accountsResult.data : [],
-        transactions: transactionsResult.success ? transactionsResult.data : [],
-        categories: categoriesResult.success ? {
-          income: categoriesResult.data.filter(cat => cat.type === 'income'),
-          expense: categoriesResult.data.filter(cat => cat.type === 'expense')
-        } : { income: [], expense: [] },
-        goals: [],
-        budgets: [],
-        recurringTransactions: recurringResult.success ? {
-          income: recurringResult.data.filter(rt => rt.type === 'income'),
-          expense: recurringResult.data.filter(rt => rt.type === 'expense')
-        } : { income: [], expense: [] },
-        cards: []
-      });
+      if (recurringResult.success) {
+        setRecurringTransactions(recurringResult.data || []);
+        console.log('Recurring transactions loaded:', recurringResult.data?.length || 0);
+      } else {
+        console.error('Recurring transactions loading error:', recurringResult.error);
+      }
+      
+      // Kullanıcı ayarlarını ve bekleyen onayları yükle
+      const [settingsResult, confirmationsResult] = await Promise.all([
+        recurringTransactionService.getUserSettings(user.id),
+        recurringTransactionService.getPendingConfirmations(user.id)
+      ]);
 
+      if (settingsResult.success) {
+        setUserSettings(settingsResult.data);
+      } else {
+        console.error('User settings loading error:', settingsResult.error);
+      }
+
+      if (confirmationsResult.success) {
+        setPendingConfirmations(confirmationsResult.data || []);
+      } else {
+        console.error('Pending confirmations loading error:', confirmationsResult.error);
+      }
+      
     } catch (error) {
-      console.error('Error loading all data:', error);
-      setError('Veriler yüklenirken hata oluştu');
+      console.error('Data loading error:', error);
+      setError('Veriler yüklenirken hata oluştu: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Ayrı ayrı veri yükleme fonksiyonları
-  const loadCategories = async () => {
-    if (!user) return;
-    
-    try {
-      const result = await categoryService.getCategories(user.id);
-      if (result.success) {
-        const incomeCats = result.data.filter(cat => cat.type === 'income');
-        const expenseCats = result.data.filter(cat => cat.type === 'expense');
-        setCategories({ income: incomeCats, expense: expenseCats });
-      } else {
-        console.error('Load categories error:', result.error);
-        setCategories({ income: [], expense: [] });
-      }
-    } catch (error) {
-      console.error('Error loading categories:', error);
-      setCategories({ income: [], expense: [] });
-    }
-  };
-
+  // Separate function to load accounts (for refreshing after transactions)
   const loadAccounts = async () => {
     if (!user) return;
     
     try {
-      const result = await accountService.getAccounts(user.id);
-      if (result.success) {
-        setAccounts(result.data || []);
-      } else {
-        console.error('Load accounts error:', result.error);
-        setAccounts([]);
+      const accountsResult = await accountService.getAccounts(user.id);
+      if (accountsResult.success) {
+        setAccounts(accountsResult.data || []);
       }
     } catch (error) {
-      console.error('Error loading accounts:', error);
-      setAccounts([]);
+      console.error('Accounts refresh error:', error);
     }
   };
 
-  const loadTransactions = async () => {
-    if (!user) return;
-    
+  // Ensure user has a primary account
+  const ensurePrimaryAccount = async (userId, existingAccounts) => {
     try {
-      const result = await transactionService.getTransactions(user.id);
-      if (result.success) {
-        setTransactions(result.data || []);
+      if (!existingAccounts || existingAccounts.length === 0) {
+        // Create default primary account
+        const defaultAccount = {
+          user_id: userId,
+          name: 'Ana Hesap',
+          type: 'cash',
+          balance: 0.00,
+          currency: 'TRY',
+          is_primary: true,
+          is_active: true
+        };
+        
+        const createResult = await accountService.createAccount(defaultAccount);
+        if (createResult.success) {
+          console.log('✓ Primary account created for user');
+          // Reload accounts to include the new primary account
+          await loadAccounts();
+        }
       } else {
-        console.error('Load transactions error:', result.error);
-        setTransactions([]);
+        // Check if any account is marked as primary
+        const hasPrimary = existingAccounts.some(account => account.is_primary === true);
+        if (!hasPrimary) {
+          // Set the first account as primary
+          const firstAccount = existingAccounts[0];
+          await accountService.setPrimaryAccount(firstAccount.id);
+          console.log('✓ Primary account set for existing accounts');
+          await loadAccounts();
+        }
       }
     } catch (error) {
-      console.error('Error loading transactions:', error);
-      setTransactions([]);
+      console.error('Error ensuring primary account:', error);
     }
   };
+
 
   const loadGoals = async () => {
     if (!user) return;
@@ -282,12 +467,8 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const getTotalBalance = () => {
-    let total = 0;
-    if (includeCashAccounts) total += getCashAccountsTotal();
-    if (includeSavings) total += getSavingsTotal();
-    if (includeCreditAvailable) total += getCreditAvailableTotal();
-    if (includeGoldCurrency) total += getGoldCurrencyTotalTRY();
-    return total;
+    // Sadece ana hesap bakiyesini döndür
+    return getCashAccountsTotal();
   };
 
   const getRecentTransactions = () => {
@@ -296,14 +477,55 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const handleTransactionAdded = async (newTransaction) => {
-    // Transaction'ı ekle
-    setTransactions(prev => [newTransaction, ...prev]);
-    
-    // Hesapları yeniden yükle (bakiye güncellemesi için)
-    await loadAccounts();
-    
-    // Tüm verileri yeniden yükle
-    await loadAllData();
+    try {
+      // Professional error handling and monitoring
+      const errorService = serviceManager.getService('errorHandling');
+      const monitoringService = serviceManager.getService('monitoring');
+      
+      if (errorService) {
+        await errorService.addBreadcrumb('transaction_added', {
+          transactionType: newTransaction.type,
+          amount: newTransaction.amount,
+          timestamp: Date.now()
+        });
+      }
+      
+      // Transaction'ı ekle
+      setTransactions(prev => [newTransaction, ...prev]);
+      
+      // Hesapları yeniden yükle (bakiye güncellemesi için)
+      await loadAccounts();
+      
+      // Tüm verileri yeniden yükle
+      await loadAllData();
+      
+      // Track successful transaction
+      if (monitoringService) {
+        await monitoringService.trackEvent('transaction_added_success', {
+          type: newTransaction.type,
+          amount: newTransaction.amount,
+          method: 'manual'
+        });
+      }
+      
+      // Send success notification
+      const notificationService = serviceManager.getService('notification');
+      if (notificationService) {
+        await notificationService.sendTransactionNotification(newTransaction);
+      }
+      
+    } catch (error) {
+      console.error('Transaction handling error:', error);
+      
+      // Professional error logging
+      const errorService = serviceManager.getService('errorHandling');
+      if (errorService) {
+        await errorService.handleBusinessLogicError(error, {
+          operation: 'handleTransactionAdded',
+          transactionData: newTransaction
+        });
+      }
+    }
   };
 
   const renderFABMenu = () => {
@@ -437,28 +659,141 @@ const HomeScreen = ({ navigation }) => {
     );
   };
 
+  // Recurring transactions yardımcı fonksiyonları
+  const getRecurringIncomeTotal = () => {
+    if (!recurringTransactions || !Array.isArray(recurringTransactions)) return 0;
+    return recurringTransactions
+      .filter(item => item.type === 'income')
+      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+  };
+
+  const getRecurringExpenseTotal = () => {
+    if (!recurringTransactions || !Array.isArray(recurringTransactions)) return 0;
+    return recurringTransactions
+      .filter(item => item.type === 'expense')
+      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+  };
+
+  const getRecurringNetTotal = () => {
+    return getRecurringIncomeTotal() - getRecurringExpenseTotal();
+  };
+
   const getMonthlyStats = () => {
-    if (!transactions || transactions.length === 0) {
-      return { income: 0, expenses: 0 };
+    if (!transactions || !Array.isArray(transactions)) {
+      return { income: 0, expenses: 0, net: 0 };
     }
 
-    const thisMonth = new Date().getMonth();
-    const thisYear = new Date().getFullYear();
-    
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
     const monthlyTransactions = transactions.filter(transaction => {
       const transactionDate = new Date(transaction.date);
-      return transactionDate.getMonth() === thisMonth && transactionDate.getFullYear() === thisYear;
+      return transactionDate.getMonth() === currentMonth && 
+             transactionDate.getFullYear() === currentYear;
     });
 
     const income = monthlyTransactions
       .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+      .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
     
     const expenses = monthlyTransactions
       .filter(t => t.type === 'expense')
-      .reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
+      .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
 
-    return { income, expenses };
+    return {
+      income,
+      expenses,
+      net: income - expenses
+    };
+  };
+
+  const getFrequencyText = (frequency) => {
+    const frequencyMap = {
+      daily: 'Günlük',
+      weekly: 'Haftalık', 
+      monthly: 'Aylık',
+      quarterly: 'Üç Aylık',
+      yearly: 'Yıllık'
+    };
+    return frequencyMap[frequency] || 'Aylık';
+  };
+
+  const formatNextDueDate = (dueDateString) => {
+    if (!dueDateString) return 'Belirtilmemiş';
+    try {
+      const dueDate = new Date(dueDateString);
+      const today = new Date();
+      const diffTime = dueDate - today;
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays < 0) {
+        return `${Math.abs(diffDays)} gün gecikmiş`;
+      } else if (diffDays === 0) {
+        return 'Bugün';
+      } else if (diffDays === 1) {
+        return 'Yarın';
+      } else if (diffDays <= 7) {
+        return `${diffDays} gün sonra`;
+      } else {
+        return dueDate.toLocaleDateString('tr-TR');
+      }
+    } catch (error) {
+      return 'Geçersiz tarih';
+    }
+  };
+
+  const renderRecurringTransactionItem = (item, type) => {
+    const isOverdue = item.next_due_date && new Date(item.next_due_date) < new Date();
+    const amountColor = type === 'income' ? '#48BB78' : '#F56565';
+    const sign = type === 'income' ? '+' : '-';
+
+    // Debug: item.name değerini kontrol et
+    console.log('Recurring item:', { 
+      id: item.id, 
+      name: item.name, 
+      description: item.description,
+      type: item.type 
+    });
+
+    // Fallback: name yoksa description, o da yoksa varsayılan değer kullan
+    const displayName = item.name || item.description || `Sabit ${type === 'income' ? 'Gelir' : 'Gider'}`;
+
+    return (
+      <View key={item.id} style={styles.recurringItem}>
+        <View style={styles.recurringItemLeft}>
+          <View style={[
+            styles.recurringItemIcon, 
+            { backgroundColor: `${amountColor}20` }
+          ]}>
+            <MaterialIcons 
+              name={item.category?.icon || 'category'} 
+              size={16} 
+              color={amountColor} 
+            />
+          </View>
+          <View style={styles.recurringItemDetails}>
+            <Text style={styles.recurringItemName}>{displayName}</Text>
+            <Text style={styles.recurringItemFrequency}>
+              {getFrequencyText(item.frequency)} • {formatNextDueDate(item.next_due_date)}
+            </Text>
+            {isOverdue && (
+              <Text style={[styles.recurringItemFrequency, { color: '#F56565', fontWeight: '600' }]}>
+                ⚠️ Vadesi geçmiş
+              </Text>
+            )}
+          </View>
+        </View>
+        <View style={styles.recurringItemRight}>
+          <Text style={[styles.recurringItemAmount, { color: amountColor }]}>
+            {sign}{formatCurrency(item.amount)}
+          </Text>
+          <Text style={styles.recurringItemAccount}>
+            {item.account?.name || 'Hesap'}
+          </Text>
+        </View>
+      </View>
+    );
   };
 
   const monthlyStats = getMonthlyStats();
@@ -468,18 +803,18 @@ const HomeScreen = ({ navigation }) => {
   // Varlıklarım kartı için kalem bazlı özet
   const assetsBreakdown = [
     {
-      id: 'cash',
-      label: 'Nakit/Vadesiz',
-      icon: 'account-balance-wallet',
-      enabled: assetsIncludeCashAccounts,
+      id: 'primary',
+      label: 'Ana Hesap',
+      icon: 'account-balance',
+      enabled: true, // Ana hesap her zaman gösterilir
       amount: getCashAccountsTotal(),
       color: '#6C63FF',
     },
     {
-      id: 'savings',
-      label: 'Tasarruf',
-      icon: 'savings',
-      enabled: assetsIncludeSavings,
+      id: 'other_accounts',
+      label: 'Diğer Hesaplar',
+      icon: 'account-balance-wallet',
+      enabled: assetsIncludeCashAccounts,
       amount: getSavingsTotal(),
       color: '#4ECDC4',
     },
@@ -529,6 +864,35 @@ const HomeScreen = ({ navigation }) => {
     </TouchableOpacity>
   );
 
+  // Onay işleme fonksiyonu
+  const handleConfirmation = async (notificationId, type, confirmed) => {
+    try {
+      let result;
+      
+      if (type === 'salary_confirmation') {
+        result = await recurringTransactionService.confirmSalary(notificationId, confirmed);
+      } else if (type === 'large_expense_confirmation') {
+        result = await recurringTransactionService.confirmLargeExpense(notificationId, confirmed);
+      }
+
+      if (result && result.success) {
+        // Bildirimi listeden kaldır
+        setPendingConfirmations(prev => prev.filter(n => n.id !== notificationId));
+        
+        // Hesapları yeniden yükle (bakiye güncellemesi için)
+        await loadAccounts();
+        
+        // Başarı mesajı göster
+        Alert.alert('Başarılı', result.message);
+      } else {
+        Alert.alert('Hata', result?.error || 'Onay işlenirken hata oluştu');
+      }
+    } catch (error) {
+      console.error('Confirmation handling error:', error);
+      Alert.alert('Hata', 'Onay işlenirken beklenmeyen bir hata oluştu');
+    }
+  };
+
   if (loading) {
     return <LoadingScreen message="Veriler yükleniyor..." />;
   }
@@ -573,17 +937,30 @@ const HomeScreen = ({ navigation }) => {
             </AccessibleText>
             <AccessibleText 
               style={styles.userName}
-              accessibilityLabel={`Kullanıcı adı: ${userData && userData.user ? `${userData.user.firstName} ${userData.user.lastName}` : 'Kullanıcı'}`}
+              accessibilityLabel={`Kullanıcı adı: ${user?.email ? user.email.split('@')[0] : 'Kullanıcı'}`}
               accessibilityHint="Giriş yapmış kullanıcının adı"
             >
-              {userData?.user ? `${userData.user.firstName} ${userData.user.lastName}` : 'Kullanıcı'}
+              {user?.email ? user.email.split('@')[0] : 'Kullanıcı'}
             </AccessibleText>
           </View>
           <AccessibleButton
             style={styles.notificationButton}
-            accessibilityLabel="Bildirimler"
-            accessibilityHint="Bildirimleri görüntüle"
-            onPress={() => {}}
+            accessibilityLabel={`Bildirimler - ${notificationCount} yeni bildirim`}
+            accessibilityHint="Bildirimleri görüntüle ve sistem durumunu kontrol et"
+            onPress={async () => {
+              // Professional notification and service status handling
+              setServiceStatusVisible(true);
+              
+              const notificationService = serviceManager.getService('notification');
+              if (notificationService) {
+                // Show notification history or settings
+                await notificationService.sendLocalNotification(
+                  '🔔 Servis Durumu',
+                  `Sistem sağlığı: ${servicesHealth === 'healthy' ? 'Normal' : 'Dikkat Gerekli'}. ${notificationCount} yeni bildirim var.`,
+                  { type: 'info' }
+                );
+              }
+            }}
           >
             <AccessibleIcon 
               name="notifications-none" 
@@ -591,38 +968,127 @@ const HomeScreen = ({ navigation }) => {
               color={theme.colors.textPrimary}
               accessibilityLabel="Bildirim ikonu"
             />
-            <View style={styles.notificationBadge} />
+            {notificationCount > 0 && (
+              <View style={[styles.notificationBadge, { backgroundColor: '#F56565' }]}>
+                <Text style={styles.notificationBadgeText}>{notificationCount}</Text>
+              </View>
+            )}
+            {/* System health indicator */}
+            <View style={[
+              styles.healthIndicator,
+              { backgroundColor: servicesHealth === 'healthy' ? '#48BB78' : servicesHealth === 'error' ? '#F56565' : '#FFE66D' }
+            ]} />
           </AccessibleButton>
           
-          {/* Supabase Test Button */}
+          {/* Professional System Health Check Button */}
           <TouchableOpacity 
-            style={styles.testButton}
+            style={[styles.testButton, {
+              backgroundColor: servicesHealth === 'healthy' ? '#48BB78' : servicesHealth === 'error' ? '#F56565' : '#FFE66D'
+            }]}
             onPress={async () => {
-              const isConnected = await testSupabaseConnection();
-              if (isConnected) {
-                console.log('✅ Supabase bağlantısı başarılı');
+              setServicesHealth('checking');
+              
+              // Run comprehensive system test
+              const testingService = serviceManager.getService('testing');
+              if (testingService) {
+                console.log('🧪 Starting comprehensive system test...');
+                const testResults = await testingService.runQuickTest();
+                
+                if (testResults.success) {
+                  setServicesHealth('healthy');
+                  console.log('✅ System test passed:', testResults);
+                  
+                  // Send success notification
+                  const notificationService = serviceManager.getService('notification');
+                  if (notificationService) {
+                    await notificationService.sendLocalNotification(
+                      '✅ Sistem Testi Başarılı',
+                      `Tüm testler geçti (${testResults.passed}/${testResults.total})`,
+                      { type: 'success' }
+                    );
+                  }
+                } else {
+                  setServicesHealth('error');
+                  console.log('❌ System test failed:', testResults);
+                  
+                  // Send error notification
+                  const notificationService = serviceManager.getService('notification');
+                  if (notificationService) {
+                    await notificationService.sendLocalNotification(
+                      '❌ Sistem Testi Başarısız',
+                      'Bazı sistem bileşenleri dikkat gerektiriyor',
+                      { type: 'error' }
+                    );
+                  }
+                }
+                
+                setLastSystemCheck(new Date());
               } else {
-                console.log('❌ Supabase bağlantısı başarısız');
+                // Fallback to basic Supabase test
+                const isConnected = await testSupabaseConnection();
+                setServicesHealth(isConnected ? 'healthy' : 'error');
+                console.log(isConnected ? '✅ Supabase bağlantısı başarılı' : '❌ Supabase bağlantısı başarısız');
               }
             }}
           >
-            <MaterialIcons name="wifi" size={20} color={theme.colors.textPrimary} />
+            <MaterialIcons 
+              name={servicesHealth === 'checking' ? 'refresh' : servicesHealth === 'healthy' ? 'check-circle' : 'error'} 
+              size={20} 
+              color="#fff" 
+            />
           </TouchableOpacity>
           
-          {/* Kapsamlı Test Button */}
+          {/* Professional Comprehensive Test Button */}
           <TouchableOpacity 
-            style={[styles.testButton, { marginLeft: 8 }]}
+            style={[styles.testButton, { marginLeft: 8, backgroundColor: '#6C63FF' }]}
             onPress={async () => {
-              console.log('🔍 Kapsamlı test başlatılıyor...');
-              const allConnected = await testAllConnections();
-              if (allConnected) {
-                console.log('✅ Tüm bağlantılar başarılı!');
+              console.log('🔍 Starting comprehensive professional test suite...');
+              
+              const testingService = serviceManager.getService('testing');
+              if (testingService) {
+                try {
+                  const comprehensiveResults = await serviceManager.runSystemTest();
+                  
+                  if (comprehensiveResults) {
+                    console.log('✅ Comprehensive test completed:', comprehensiveResults);
+                    
+                    // Send detailed notification
+                    const notificationService = serviceManager.getService('notification');
+                    if (notificationService) {
+                      await notificationService.sendLocalNotification(
+                        '📈 Kapsamlı Test Tamamlandı',
+                        `Sonuç: ${comprehensiveResults.passed}/${comprehensiveResults.total} test geçti (${comprehensiveResults.passRate}%)`,
+                        { 
+                          type: comprehensiveResults.passRate > 80 ? 'success' : 'warning',
+                          data: comprehensiveResults
+                        }
+                      );
+                    }
+                    
+                    // Update health status based on test results
+                    setServicesHealth(comprehensiveResults.passRate > 80 ? 'healthy' : 'degraded');
+                  } else {
+                    throw new Error('Test service not available');
+                  }
+                } catch (error) {
+                  console.error('❌ Comprehensive test failed:', error);
+                  setServicesHealth('error');
+                }
               } else {
-                console.log('❌ Bazı bağlantılar başarısız!');
+                // Fallback to basic connection test
+                console.log('🔍 Kapsamlı test başlatılıyor...');
+                const allConnected = await testAllConnections();
+                if (allConnected) {
+                  console.log('✅ Tüm bağlantılar başarılı!');
+                  setServicesHealth('healthy');
+                } else {
+                  console.log('❌ Bazı bağlantılar başarısız!');
+                  setServicesHealth('error');
+                }
               }
             }}
           >
-            <MaterialIcons name="check-circle" size={20} color={theme.colors.textPrimary} />
+            <MaterialIcons name="analytics" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
 
@@ -632,28 +1098,72 @@ const HomeScreen = ({ navigation }) => {
             horizontal
             showsHorizontalScrollIndicator={false}
             ref={horizontalScrollRef}
-            pagingEnabled={true}
-            snapToInterval={CARD_WIDTH}
+            pagingEnabled={false}
+            snapToInterval={SNAP_INTERVAL}
             decelerationRate="fast"
-            snapToAlignment="start"
-            contentContainerStyle={[styles.topCardsContainer, { paddingVertical: theme.spacing.sm }]}
+            snapToAlignment="center"
+            contentContainerStyle={[
+              styles.topCardsContainer, 
+              { 
+                paddingTop: theme.spacing.lg, // Üst padding ekle - header'dan uzaklaştır
+                paddingBottom: theme.spacing.sm,
+                paddingHorizontal: theme.screen.isSmall ? theme.spacing.md : theme.screen.isMedium ? theme.spacing.lg : theme.spacing.xl,
+                overflow: 'visible',
+              }
+            ]}
             scrollEventThrottle={16}
             bounces={false}
+            centerContent={true}
             onMomentumScrollEnd={(e) => {
               const x = e.nativeEvent.contentOffset.x;
-              const index = Math.round(x / CARD_WIDTH);
-              horizontalScrollRef.current?.scrollTo({ x: index * CARD_WIDTH, animated: true });
+              const cardIndex = Math.round(x / SNAP_INTERVAL);
+              const targetX = cardIndex * SNAP_INTERVAL;
+              
+              // Ensure we don't scroll beyond bounds
+              const maxScrollX = SNAP_INTERVAL; // For 2 cards (0 and 1 index)
+              const clampedX = Math.max(0, Math.min(targetX, maxScrollX));
+              
+              // Only scroll if there's a significant difference to prevent unnecessary animations
+              if (Math.abs(x - clampedX) > 10) {
+                horizontalScrollRef.current?.scrollTo({ 
+                  x: clampedX, 
+                  animated: true 
+                });
+              }
+            }}
+            onScrollEndDrag={(e) => {
+              // Handle manual scroll end for better user experience
+              const x = e.nativeEvent.contentOffset.x;
+              const cardIndex = Math.round(x / SNAP_INTERVAL);
+              const targetX = cardIndex * SNAP_INTERVAL;
+              const maxScrollX = SNAP_INTERVAL;
+              const clampedX = Math.max(0, Math.min(targetX, maxScrollX));
+              
+              horizontalScrollRef.current?.scrollTo({ 
+                x: clampedX, 
+                animated: true 
+              });
+            }}
+            onLayout={() => {
+              // Auto-center the first card when layout is complete
+              setTimeout(() => {
+                horizontalScrollRef.current?.scrollTo({ 
+                  x: 0, 
+                  animated: false 
+                });
+              }, 100);
             }}
           >
             {/* Toplam Bakiye */}
-            <LinearGradient
-              colors={[theme.colors.primary, theme.colors.secondary]}
-              style={[styles.balanceCard, styles.topCard, { width: CARD_WIDTH }]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
+            <View style={styles.cardWrapper}>
+              <LinearGradient
+                colors={[theme.colors.primary, theme.colors.secondary]}
+                style={[styles.balanceCard, styles.topCard, { width: CARD_WIDTH }]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
               <View style={styles.balanceHeader}>
-                <Text style={styles.balanceLabel}>Toplam Bakiye</Text>
+                <Text style={styles.balanceLabel}>Ana Hesap Bakiyesi</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <TouchableOpacity onPress={() => setBalanceSettingsVisible(true)} style={styles.balanceSettingsButton}>
                     <MaterialIcons name="tune" size={20} color="rgba(255,255,255,0.9)" />
@@ -676,15 +1186,17 @@ const HomeScreen = ({ navigation }) => {
                   <Text style={[styles.balanceSubAmount, { color: '#F56565' }]}>-{formatCurrency(monthlyStats.expenses)}</Text>
                 </View>
               </View>
-            </LinearGradient>
+              </LinearGradient>
+            </View>
 
             {/* Varlıklarım */}
-            <LinearGradient
-              colors={[theme.colors.secondary, theme.colors.primary]}
-              style={[styles.balanceCard, styles.assetsCard, styles.topCard, { width: CARD_WIDTH }]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
+            <View style={styles.cardWrapper}>
+              <LinearGradient
+                colors={[theme.colors.secondary, theme.colors.primary]}
+                style={[styles.balanceCard, styles.assetsCard, styles.topCard, { width: CARD_WIDTH }]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
               <View style={styles.balanceHeader}>
                 <Text style={styles.balanceLabel}>Varlıklarım</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -698,27 +1210,26 @@ const HomeScreen = ({ navigation }) => {
               </View>
               <Text style={styles.balanceAmount}>
                 {showAssets ? formatCurrency(
-                  (assetsIncludeCashAccounts ? getCashAccountsTotal() : 0) +
-                  (assetsIncludeSavings ? getSavingsTotal() : 0) +
+                  (assetsIncludeCashAccounts ? getSavingsTotal() : 0) +
                   (assetsIncludeCreditAvailable ? getCreditAvailableTotal() : 0) +
                   (assetsIncludeGoldCurrency ? getGoldCurrencyTotalTRY() : 0)
                 ) : '••••••'}
               </Text>
               <Text style={styles.assetsSubtitle}>Dahil edilenler</Text>
               {showAssets && (
-                <View style={styles.assetsBreakdownContainer}>
-                  {assetsBreakdown.filter(b => b.enabled).map(item => (
-                    <View key={item.id} style={styles.assetChip}>
-                      <View style={[styles.assetChipIcon, { backgroundColor: item.color }]}>
-                        <MaterialIcons name={item.icon} size={14} color="#fff" />
-                      </View>
-                      <Text style={styles.assetChipLabel}>{item.label}</Text>
-                      <Text style={styles.assetChipAmount}>{formatCurrency(item.amount)}</Text>
-                    </View>
-                  ))}
-                </View>
+                <TouchableOpacity 
+                  style={styles.assetsBreakdownContainer}
+                  onPress={() => setAssetsBreakdownVisible(true)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.assetsBreakdownHeader}>
+                    <Text style={styles.assetsBreakdownTitle}>Detayları Gör</Text>
+                    <MaterialIcons name="expand-more" size={16} color="rgba(255,255,255,0.8)" />
+                  </View>
+                </TouchableOpacity>
               )}
             </LinearGradient>
+          </View>
           </ScrollView>
         </Animated.View>
 
@@ -821,74 +1332,153 @@ const HomeScreen = ({ navigation }) => {
 
         {/* Sabit Gelir ve Giderler Özeti */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Sabit Gelir & Giderler</Text>
-          {userData?.recurringTransactions ? (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Sabit Gelir & Giderler</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Transactions')}>
+              <Text style={styles.seeAllButton}>Yönet</Text>
+            </TouchableOpacity>
+          </View>
+          {/* Recurring Transactions Summary */}
+          {recurringTransactions && recurringTransactions.length > 0 ? (
             <View style={styles.recurringContainer}>
               {/* Sabit Gelirler */}
-              <View style={styles.recurringSection}>
-                <View style={styles.recurringHeader}>
-                  <MaterialIcons name="trending-up" size={20} color="#48BB78" />
-                  <Text style={styles.recurringSectionTitle}>Sabit Gelirler</Text>
-                  <Text style={styles.recurringTotal}>
-                    +{formatCurrency(userData.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0))}
-                  </Text>
+              {recurringTransactions.filter(item => item.type === 'income').length > 0 && (
+                <View style={styles.recurringSection}>
+                  <View style={styles.recurringHeader}>
+                    <MaterialIcons name="trending-up" size={20} color="#48BB78" />
+                    <Text style={styles.recurringSectionTitle}>Sabit Gelirler</Text>
+                    <Text style={styles.recurringTotal}>
+                      +{formatCurrency(getRecurringIncomeTotal())}
+                    </Text>
+                  </View>
+                  <View style={styles.recurringItems}>
+                    {recurringTransactions.filter(item => item.type === 'income').map(item => renderRecurringTransactionItem(item, 'income'))}
+                  </View>
                 </View>
-                <View style={styles.recurringItems}>
-                  {userData.recurringTransactions.income.map(item => (
-                    <View key={item.id} style={styles.recurringItem}>
-                      <Text style={styles.recurringItemName}>{item.name}</Text>
-                      <Text style={styles.recurringItemAmount}>+{formatCurrency(item.amount)}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
+              )}
 
               {/* Sabit Giderler */}
-              <View style={styles.recurringSection}>
-                <View style={styles.recurringHeader}>
-                  <MaterialIcons name="trending-down" size={20} color="#F56565" />
-                  <Text style={styles.recurringSectionTitle}>Sabit Giderler</Text>
-                  <Text style={styles.recurringTotal}>
-                    -{formatCurrency(userData.recurringTransactions.expense.reduce((sum, item) => sum + item.amount, 0))}
-                  </Text>
+              {recurringTransactions.filter(item => item.type === 'expense').length > 0 && (
+                <View style={styles.recurringSection}>
+                  <View style={styles.recurringHeader}>
+                    <MaterialIcons name="trending-down" size={20} color="#F56565" />
+                    <Text style={styles.recurringSectionTitle}>Sabit Giderler</Text>
+                    <Text style={styles.recurringTotal}>
+                      -{formatCurrency(getRecurringExpenseTotal())}
+                    </Text>
+                  </View>
+                  <View style={styles.recurringItems}>
+                    {recurringTransactions.filter(item => item.type === 'expense').map(item => renderRecurringTransactionItem(item, 'expense'))}
+                  </View>
                 </View>
-                <View style={styles.recurringItems}>
-                  {userData.recurringTransactions.expense.map(item => (
-                    <View key={item.id} style={styles.recurringItem}>
-                      <Text style={styles.recurringItemName}>{item.name}</Text>
-                      <Text style={styles.recurringItemAmount}>-{formatCurrency(item.amount)}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
+              )}
 
               {/* Net Durum */}
               <View style={styles.netStatusContainer}>
+                <View style={styles.netStatusHeader}>
+                  <MaterialIcons 
+                    name={getRecurringNetTotal() >= 0 ? "trending-up" : "trending-down"} 
+                    size={20} 
+                    color={getRecurringNetTotal() >= 0 ? '#48BB78' : '#F56565'} 
+                  />
+                  <Text style={styles.netStatusLabel}>Aylık Net Durum</Text>
+                </View>
                 <Text style={[
                   styles.netStatusText,
-                  { color: (userData.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) -
-                    userData.recurringTransactions.expense.reduce((sum, item) => sum + item.amount, 0)) >= 0
-                    ? '#48BB78' : '#F56565' }
+                  { color: getRecurringNetTotal() >= 0 ? '#48BB78' : '#F56565' }
                 ]}>
-                  Net: {(userData.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) -
-                    userData.recurringTransactions.expense.reduce((sum, item) => sum + item.amount, 0)) >= 0 ? '+' : ''}
-                  {formatCurrency(
-                    userData.recurringTransactions.income.reduce((sum, item) => sum + item.amount, 0) -
-                    userData.recurringTransactions.expense.reduce((sum, item) => sum + item.amount, 0)
-                  )}
+                  {getRecurringNetTotal() >= 0 ? '+' : ''}{formatCurrency(getRecurringNetTotal())}
+                </Text>
+                <Text style={styles.netStatusDescription}>
+                  {getRecurringNetTotal() >= 0 
+                    ? 'Sabit gelirleriniz giderlerinizi karşılıyor' 
+                    : 'Sabit giderleriniz gelirlerinizi aşıyor'
+                  }
                 </Text>
               </View>
             </View>
           ) : (
-            <EmptyState
-              type="general"
-              title="Sabit Gelir/Gider Yok"
-              subtitle="Düzenli gelir ve giderlerinizi tanımlayarak finansal planlamanızı kolaylaştırın"
-              actionText="Ekle"
-              actionIcon="add"
-              onAction={() => navigation.navigate('Transactions')}
-              size="small"
-            />
+            <View style={styles.recurringEmptyContainer}>
+              <MaterialIcons name="repeat" size={48} color={theme.colors.textSecondary} style={styles.recurringEmptyIcon} />
+              <Text style={styles.recurringEmptyTitle}>Sabit Gelir/Gider Tanımlı Değil</Text>
+              <Text style={styles.recurringEmptySubtitle}>
+                Düzenli gelir ve giderlerinizi tanımlayarak finansal planlamanızı kolaylaştırın
+              </Text>
+              <TouchableOpacity 
+                style={styles.recurringEmptyButton}
+                onPress={() => navigation.navigate('Transactions')}
+              >
+                <MaterialIcons name="add" size={20} color="#fff" />
+                <Text style={styles.recurringEmptyButtonText}>İlk Sabit İşlemi Ekle</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* Bildirimler ve Onaylar Bölümü */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Bildirimler & Onaylar</Text>
+            <TouchableOpacity onPress={() => setNotificationsVisible(true)}>
+              <Text style={styles.seeAllButton}>Tümünü Gör</Text>
+            </TouchableOpacity>
+          </View>
+          
+          {/* Bekleyen Onaylar */}
+          {pendingConfirmations && pendingConfirmations.length > 0 ? (
+            <View style={styles.notificationsContainer}>
+              {pendingConfirmations.slice(0, 3).map((notification) => (
+                <View key={notification.id} style={styles.notificationItem}>
+                  <View style={styles.notificationIcon}>
+                    <MaterialIcons 
+                      name={notification.type === 'salary_confirmation' ? 'account-balance' : 'receipt'} 
+                      size={20} 
+                      color={notification.type === 'salary_confirmation' ? '#48BB78' : '#F56565'} 
+                    />
+                  </View>
+                  <View style={styles.notificationContent}>
+                    <Text style={styles.notificationTitle}>{notification.title}</Text>
+                    <Text style={styles.notificationMessage}>{notification.message}</Text>
+                    <Text style={styles.notificationTime}>
+                      {new Date(notification.created_at).toLocaleDateString('tr-TR')}
+                    </Text>
+                  </View>
+                  <View style={styles.notificationActions}>
+                    <TouchableOpacity 
+                      style={[styles.notificationButton, styles.confirmButton]}
+                      onPress={() => handleConfirmation(notification.id, notification.type, true)}
+                    >
+                      <Text style={styles.confirmButtonText}>Onayla</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.notificationButton, styles.rejectButton]}
+                      onPress={() => handleConfirmation(notification.id, notification.type, false)}
+                    >
+                      <Text style={styles.rejectButtonText}>Reddet</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+              
+              {pendingConfirmations.length > 3 && (
+                <TouchableOpacity 
+                  style={styles.showMoreButton}
+                  onPress={() => setNotificationsVisible(true)}
+                >
+                  <Text style={styles.showMoreButtonText}>
+                    +{pendingConfirmations.length - 3} daha onay bekliyor
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            <View style={styles.noNotificationsContainer}>
+              <MaterialIcons name="notifications-none" size={48} color={theme.colors.textSecondary} />
+              <Text style={styles.noNotificationsTitle}>Bekleyen Onay Yok</Text>
+              <Text style={styles.noNotificationsSubtitle}>
+                Tüm sabit işlemleriniz otomatik olarak işleniyor
+              </Text>
+            </View>
           )}
         </View>
 
@@ -902,8 +1492,8 @@ const HomeScreen = ({ navigation }) => {
               <Text style={styles.seeAllButton}>Yönet</Text>
             </TouchableOpacity>
           </View>
-          {userData?.goals ? (
-            userData.goals.filter(goal => goal.showOnHome).map((goal) => {
+          {goals && goals.length > 0 ? (
+            goals.filter(goal => goal.showOnHome).map((goal) => {
               const progress = (goal.currentAmount / goal.targetAmount) * 100;
               return (
                 <CustomCard key={goal.id} style={styles.goalCard}>
@@ -938,8 +1528,8 @@ const HomeScreen = ({ navigation }) => {
               <Text style={styles.seeAllButton}>Yönet</Text>
             </TouchableOpacity>
           </View>
-          {userData?.budgets ? (
-            userData.budgets.filter(budget => budget.showOnHome).map((budget) => {
+          {budgets && budgets.length > 0 ? (
+            budgets.filter(budget => budget.showOnHome).map((budget) => {
               const progress = (budget.spent / budget.limit) * 100;
               const isOverBudget = progress > 100;
               return (
@@ -1076,6 +1666,143 @@ const HomeScreen = ({ navigation }) => {
           </View>
         </SafeAreaView>
       </Modal>
+      
+      {/* Professional Service Status Modal */}
+      <ServiceStatusModal
+        visible={serviceStatusVisible}
+        onClose={() => setServiceStatusVisible(false)}
+      />
+
+      {/* Varlıklar Detayları Modal */}
+      <Modal
+        visible={assetsBreakdownVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setAssetsBreakdownVisible(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setAssetsBreakdownVisible(false)} style={styles.closeButton}>
+              <MaterialIcons name="close" size={24} color={theme.colors.textPrimary} />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Varlık Detayları</Text>
+            <View style={{ width: 40 }} />
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            {assetsBreakdown.filter(b => b.id !== 'primary' && b.enabled).map(item => (
+              <View key={item.id} style={styles.assetDetailItem}>
+                <View style={styles.assetDetailLeft}>
+                  <View style={[styles.assetDetailIcon, { backgroundColor: item.color }]}>
+                    <MaterialIcons name={item.icon} size={20} color="#fff" />
+                  </View>
+                  <View style={styles.assetDetailInfo}>
+                    <Text style={styles.assetDetailLabel}>{item.label}</Text>
+                    <Text style={styles.assetDetailDescription}>
+                      {item.id === 'other_accounts' ? 'Tasarruf ve yatırım hesapları' :
+                       item.id === 'credit' ? 'Kullanılabilir kredi limiti' :
+                       item.id === 'gold' ? 'Altın ve döviz varlıkları' : 'Diğer varlıklar'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.assetDetailAmount}>{formatCurrency(item.amount)}</Text>
+              </View>
+            ))}
+            
+            {assetsBreakdown.filter(b => b.id !== 'primary' && b.enabled).length === 0 && (
+              <View style={styles.emptyAssetsContainer}>
+                <MaterialIcons name="info" size={48} color={theme.colors.textSecondary} />
+                <Text style={styles.emptyAssetsTitle}>Varlık Kalemi Seçilmemiş</Text>
+                <Text style={styles.emptyAssetsSubtitle}>
+                  Varlık ayarlarından hangi kalemlerin dahil edileceğini seçin
+                </Text>
+                <TouchableOpacity 
+                  style={styles.emptyAssetsButton}
+                  onPress={() => {
+                    setAssetsBreakdownVisible(false);
+                    setAssetsSettingsVisible(true);
+                  }}
+                >
+                  <Text style={styles.emptyAssetsButtonText}>Ayarları Aç</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Bildirimler Modal */}
+      <Modal
+        visible={notificationsVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setNotificationsVisible(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setNotificationsVisible(false)} style={styles.closeButton}>
+              <MaterialIcons name="close" size={24} color={theme.colors.textPrimary} />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Bildirimler & Onaylar</Text>
+            <View style={{ width: 40 }} />
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            {pendingConfirmations.length > 0 ? (
+              pendingConfirmations.map((notification) => (
+                <View key={notification.id} style={styles.modalNotificationItem}>
+                  <View style={styles.modalNotificationHeader}>
+                    <View style={styles.modalNotificationIcon}>
+                      <MaterialIcons 
+                        name={notification.type === 'salary_confirmation' ? 'account-balance' : 'receipt'} 
+                        size={24} 
+                        color={notification.type === 'salary_confirmation' ? '#48BB78' : '#F56565'} 
+                      />
+                    </View>
+                    <View style={styles.modalNotificationInfo}>
+                      <Text style={styles.modalNotificationTitle}>{notification.title}</Text>
+                      <Text style={styles.modalNotificationTime}>
+                        {new Date(notification.created_at).toLocaleDateString('tr-TR')}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  <Text style={styles.modalNotificationMessage}>{notification.message}</Text>
+                  
+                  <View style={styles.modalNotificationActions}>
+                    <TouchableOpacity 
+                      style={[styles.modalNotificationButton, styles.modalConfirmButton]}
+                      onPress={() => {
+                        handleConfirmation(notification.id, notification.type, true);
+                        setNotificationsVisible(false);
+                      }}
+                    >
+                      <Text style={styles.modalConfirmButtonText}>Onayla</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.modalNotificationButton, styles.modalRejectButton]}
+                      onPress={() => {
+                        handleConfirmation(notification.id, notification.type, false);
+                        setNotificationsVisible(false);
+                      }}
+                    >
+                      <Text style={styles.modalRejectButtonText}>Reddet</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <View style={styles.modalNoNotificationsContainer}>
+                <MaterialIcons name="notifications-none" size={64} color={theme.colors.textSecondary} />
+                <Text style={styles.modalNoNotificationsTitle}>Bekleyen Onay Yok</Text>
+                <Text style={styles.modalNoNotificationsSubtitle}>
+                  Tüm sabit işlemleriniz otomatik olarak işleniyor veya zaten onaylandı
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1092,7 +1819,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.md,
-    paddingBottom: theme.spacing.lg,
+    paddingBottom: theme.spacing.xl, // lg'den xl'e çıkar - kartlar için daha fazla alan
   },
 
   greeting: {
@@ -1128,18 +1855,20 @@ const styles = StyleSheet.create({
   },
 
   balanceCard: {
-    marginHorizontal: 0, // Margin'i kaldırdım çünkü container'da padding var
+    marginHorizontal: 0,
+    marginTop: theme.spacing.md, // Üst margin ekle - header'dan uzaklaştır
     marginBottom: theme.spacing.xl,
     borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.xl,
+    padding: theme.spacing.lg,
     elevation: 8,
     shadowColor: theme.colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    // Kartların daha iyi görünmesi için
-    minHeight: 180,
+    minHeight: 240,
+    height: 240,
     justifyContent: 'space-between',
+    overflow: 'visible',
   },
 
   balanceHeader: {
@@ -1147,25 +1876,34 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: theme.spacing.sm,
+    flexWrap: 'wrap', // Wrap ekle
+    // overflow: 'hidden' kaldırıldı
   },
 
   balanceLabel: {
     fontSize: 16,
     color: 'rgba(255,255,255,0.8)',
     fontWeight: '500',
+    flex: 1, // Flex ekle
+    flexWrap: 'wrap', // Wrap ekle
+    // overflow: 'hidden' kaldırıldı
   },
 
   balanceAmount: {
-    fontSize: 36,
+    fontSize: 30, // 32'den 30'a düşür - daha iyi sığması için
     color: '#FFFFFF',
     fontWeight: '800',
-    marginBottom: theme.spacing.lg,
+    marginBottom: theme.spacing.md,
     letterSpacing: -1,
+    // overflow: 'hidden' kaldırıldı
+    textAlign: 'center', // Merkeze hizala
   },
 
   balanceSubInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    flexWrap: 'wrap', // Wrap ekle
+    // overflow: 'hidden' kaldırıldı
   },
 
   balanceItem: {
@@ -1173,47 +1911,60 @@ const styles = StyleSheet.create({
   },
 
   balanceSubLabel: {
-    fontSize: 12,
+    fontSize: 12, // 11'den 12'ye çıkar - daha okunabilir
     color: 'rgba(255,255,255,0.7)',
     fontWeight: '500',
     marginBottom: 4,
+    // overflow: 'hidden' kaldırıldı
+    flexWrap: 'wrap', // Wrap ekle
   },
 
   balanceSubAmount: {
-    fontSize: 16,
+    fontSize: 15, // 14'ten 15'e çıkar - daha okunabilir
     fontWeight: '700',
+    // overflow: 'hidden' kaldırıldı
+    flexWrap: 'wrap', // Wrap ekle
   },
 
   section: {
     marginBottom: theme.layout.sectionSpacing,
+    marginTop: theme.spacing.lg, // Üst margin ekle
+    paddingHorizontal: theme.spacing.lg, // Yatay padding ekle
   },
 
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: theme.layout.contentPadding,
     marginBottom: theme.spacing.md,
+    marginTop: theme.spacing.md, // Üst margin ekle
+    // paddingHorizontal kaldırıldı - section'ta zaten var
   },
 
   sectionTitle: {
     fontSize: theme.typography.h4.fontSize,
     color: theme.colors.textPrimary,
     fontWeight: '700',
-    paddingHorizontal: theme.layout.contentPadding,
-    marginBottom: theme.spacing.md,
+    flex: 1, // Başlığa flex: 1 ekle
+    marginRight: theme.spacing.md, // Sağ margin ekle
+    // overflow: 'hidden' kaldırıldı
   },
 
   seeAllButton: {
     fontSize: 14,
     color: theme.colors.primary,
     fontWeight: '600',
+    paddingHorizontal: theme.spacing.sm, // Yatay padding ekle
+    paddingVertical: theme.spacing.xs, // Dikey padding ekle
+    // overflow: 'hidden' kaldırıldı
   },
 
   quickActions: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingHorizontal: theme.layout.contentPadding,
+    marginTop: theme.spacing.md, // Üst margin ekle
+    marginBottom: theme.spacing.md, // Alt margin ekle
+    // paddingHorizontal kaldırıldı - section'ta zaten var
   },
 
   quickActionButton: {
@@ -1240,7 +1991,9 @@ const styles = StyleSheet.create({
   },
 
   transactionsList: {
-    paddingHorizontal: theme.layout.contentPadding,
+    marginTop: theme.spacing.md, // Üst margin ekle
+    marginBottom: theme.spacing.md, // Alt margin ekle
+    // paddingHorizontal kaldırıldı - section'ta zaten var
   },
 
   transactionItem: {
@@ -1295,8 +2048,10 @@ const styles = StyleSheet.create({
   overviewGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: theme.spacing.lg,
+    marginTop: theme.spacing.md, // Üst margin ekle
+    marginBottom: theme.spacing.md, // Alt margin ekle
     justifyContent: 'space-between',
+    // paddingHorizontal kaldırıldı - section'ta zaten var
   },
 
   overviewCard: {
@@ -1323,9 +2078,9 @@ const styles = StyleSheet.create({
   },
 
   goalCard: {
-    marginHorizontal: theme.spacing.lg,
     marginBottom: theme.spacing.md,
     padding: theme.spacing.lg,
+    // marginHorizontal kaldırıldı - section'ta zaten var
   },
 
   goalHeader: {
@@ -1626,16 +2381,22 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.sm,
   },
   topCardsContainer: {
-    paddingVertical: theme.spacing.sm,
+    paddingTop: theme.spacing.lg, // Üst padding ekle - header'dan uzaklaştır
+    paddingBottom: theme.spacing.sm,
     paddingHorizontal: theme.screen.isSmall ? theme.spacing.md : theme.screen.isMedium ? theme.spacing.lg : theme.spacing.xl,
+    overflow: 'visible',
   },
   topCard: {
-    marginRight: CARD_GAP,
-    // Kartların daha iyi görünmesi için
-    minHeight: theme.screen.isSmall ? 160 : theme.screen.isMedium ? 180 : 200,
+    marginRight: CARD_SPACING,
+    // Her iki kartın da aynı boyutta olması için
+    height: 240, // 220'den 240'a çıkar
+    minHeight: 240, // 220'den 240'a çıkar
   },
   assetsCard: {
     backgroundColor: 'transparent',
+    // Varlıklar kartının da aynı boyutta olması için
+    height: 240, // 220'den 240'a çıkar
+    minHeight: 240, // 220'den 240'a çıkar
   },
   assetsSubtitle: {
     color: 'rgba(255,255,255,0.9)',
@@ -1649,6 +2410,8 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.md,
     paddingVertical: theme.spacing.sm,
     paddingHorizontal: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   assetChip: {
     flexDirection: 'row',
@@ -1680,8 +2443,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.95)',
     borderRadius: theme.borderRadius.md,
     padding: theme.screen.isSmall ? theme.spacing.md : theme.spacing.lg,
-    marginHorizontal: theme.screen.isSmall ? theme.spacing.md : theme.spacing.lg,
+    marginTop: theme.spacing.md, // Üst margin ekle
     marginBottom: theme.spacing.md,
+    // marginHorizontal kaldırıldı - section'ta zaten var
     ...theme.shadows.medium,
   },
   recurringSection: {
@@ -1692,10 +2456,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: theme.spacing.sm,
+    flexWrap: 'wrap', // Wrap ekle
+    // overflow: 'hidden' kaldırıldı
   },
   recurringHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1, // Sol tarafa flex: 1 ekle
+    // overflow: 'hidden' kaldırıldı
   },
   recurringHeaderIcon: {
     width: 36,
@@ -1707,10 +2475,11 @@ const styles = StyleSheet.create({
   },
   recurringSectionTitle: {
     fontSize: 16,
-    color: theme.colors.textPrimary,
+    color: '#1A202C', // Daha koyu ve belirgin renk
     fontWeight: '600',
-    flex: 1,
+    flex: 1, // Başlığa flex: 1 ekle
     marginLeft: theme.spacing.sm,
+    // overflow: 'hidden' kaldırıldı
   },
   recurringSubtitle: {
     fontSize: 10,
@@ -1720,7 +2489,10 @@ const styles = StyleSheet.create({
   recurringTotal: {
     fontSize: 16,
     fontWeight: '700',
-    color: theme.colors.textPrimary,
+    color: '#1A202C', // Daha koyu ve belirgin renk
+    textAlign: 'right', // Sağa hizala
+    minWidth: 80, // Minimum genişlik ekle
+    // overflow: 'hidden' kaldırıldı
   },
   recurringItems: {
     marginLeft: theme.spacing.sm,
@@ -1731,10 +2503,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: theme.spacing.xs,
     paddingVertical: theme.spacing.xs,
+    flexWrap: 'wrap', // Wrap ekle
+    // overflow: 'hidden' kaldırıldı - yazının görünmesini engelleyebilir
   },
   recurringItemLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1, // Flex ekle
+    flexWrap: 'wrap', // Wrap ekle
+    // overflow: 'hidden' kaldırıldı - yazının görünmesini engelleyebilir
   },
   recurringItemIcon: {
     width: 24,
@@ -1761,50 +2538,76 @@ const styles = StyleSheet.create({
   },
   recurringItemRight: {
     alignItems: 'flex-end',
+    flex: 0, // Flex 0 yap - sabit genişlik
+    minWidth: 80, // Minimum genişlik ekle
+    overflow: 'hidden', // Taşan içeriği gizle
   },
   recurringItemAmount: {
     fontSize: 13,
     fontWeight: '600',
+    textAlign: 'right', // Sağa hizala
+    overflow: 'hidden', // Taşan içeriği gizle
+    flexWrap: 'wrap', // Wrap ekle
+  },
+  recurringItemAccount: {
+    fontSize: 10,
+    color: '#4A5568', // Daha belirgin renk
+    marginTop: 2,
+    textAlign: 'right', // Sağa hizala
+    overflow: 'hidden', // Taşan içeriği gizle
+    flexWrap: 'wrap', // Wrap ekle
   },
   recurringItemFrequency: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.7)',
+    color: '#4A5568', // Daha belirgin renk
     marginTop: 2,
+    overflow: 'hidden', // Taşan içeriği gizle
+    flexWrap: 'wrap', // Wrap ekle
   },
-  netBalanceContainer: {
+  netStatusContainer: {
     marginTop: theme.spacing.md,
     paddingTop: theme.spacing.md,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.2)',
-  },
-  netBalanceLabel: {
-    fontSize: 14,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-    marginLeft: theme.spacing.sm,
-  },
-  netBalanceAmount: {
-    fontSize: 20,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginTop: theme.spacing.xs,
-  },
-  netBalanceBreakdown: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: theme.spacing.xs,
-  },
-  netBalanceItem: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.md,
     alignItems: 'center',
+    // overflow: 'hidden' kaldırıldı - gölge efekti korunuyor
   },
-  netBalanceItemLabel: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.7)',
-    fontWeight: '500',
+  netStatusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.xs,
+    justifyContent: 'center', // Merkeze hizala
+    flexWrap: 'wrap', // Wrap ekle
+    // overflow: 'hidden' kaldırıldı
   },
-  netBalanceItemValue: {
-    fontSize: 16,
+  netStatusLabel: {
+    fontSize: 14,
+    color: '#1A202C', // Daha koyu ve belirgin renk
+    fontWeight: '600',
+    marginLeft: theme.spacing.xs,
+    textAlign: 'center', // Merkeze hizala
+    // overflow: 'hidden' kaldırıldı
+  },
+  netStatusText: {
+    fontSize: 18,
     fontWeight: '700',
+    color: '#1A202C', // Daha koyu ve belirgin renk
+    textAlign: 'center',
+    marginVertical: theme.spacing.xs,
+    flexWrap: 'wrap', // Wrap ekle
+    // overflow: 'hidden' kaldırıldı
+  },
+  netStatusDescription: {
+    fontSize: 12,
+    color: '#4A5568', // Daha belirgin renk
+    textAlign: 'center',
+    fontStyle: 'italic',
+    paddingHorizontal: theme.spacing.sm, // Yatay padding ekle
+    flexWrap: 'wrap', // Wrap ekle
+    // overflow: 'hidden' kaldırıldı
   },
   emptyText: {
     fontSize: 14,
@@ -1823,6 +2626,7 @@ const styles = StyleSheet.create({
     padding: theme.spacing.lg,
     borderRadius: theme.borderRadius.lg,
     marginBottom: theme.spacing.md,
+    marginTop: theme.spacing.sm, // Üst margin ekle
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -1902,21 +2706,58 @@ const styles = StyleSheet.create({
   },
   recurringItemName: {
     fontSize: 13,
-    color: theme.colors.textPrimary,
+    color: '#1A202C', // Daha koyu ve belirgin renk
     fontWeight: '600',
     marginBottom: 2,
+    flexWrap: 'wrap', // Wrap ekle
+    // overflow: 'hidden' kaldırıldı - yazının görünmesini engelleyebilir
   },
-  netStatusContainer: {
-    marginTop: theme.spacing.md,
-    paddingTop: theme.spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.2)',
+  recurringEmptyContainer: {
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.lg,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: theme.borderRadius.lg,
+    marginTop: theme.spacing.md, // Üst margin ekle
+    marginBottom: theme.spacing.md, // Alt margin ekle
+    // marginHorizontal kaldırıldı - section'ta zaten var
   },
-  netStatusText: {
+  recurringEmptyIcon: {
+    marginBottom: theme.spacing.md,
+    opacity: 0.6,
+  },
+  recurringEmptyTitle: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
+    color: '#1A202C', // Daha koyu ve belirgin renk
+    marginBottom: theme.spacing.sm,
     textAlign: 'center',
-    marginTop: theme.spacing.xs,
+  },
+  recurringEmptySubtitle: {
+    fontSize: 14,
+    color: '#4A5568', // Daha belirgin renk
+    textAlign: 'center',
+    marginBottom: theme.spacing.lg,
+    lineHeight: 20,
+  },
+  recurringEmptyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    elevation: 2,
+    shadowColor: theme.colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  recurringEmptyButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: theme.spacing.xs,
   },
   emptyStateText: {
     fontSize: 14,
@@ -1963,6 +2804,336 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.1)',
     marginLeft: theme.spacing.sm,
+  },
+  
+  // Professional service styles
+  notificationBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    lineHeight: 14,
+  },
+  healthIndicator: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  
+  // New styles for improved card centering
+  topCardsContainer: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    minWidth: '100%',
+  },
+  
+  cardWrapper: {
+    marginRight: CARD_SPACING,
+    marginTop: theme.spacing.sm, // Üst margin ekle
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: CARD_WIDTH,
+    height: 240,
+    overflow: 'visible',
+  },
+
+  // Varlık Detayları Modal Stilleri
+  modalContent: {
+    flex: 1,
+    paddingHorizontal: theme.spacing.lg,
+  },
+  assetDetailItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.md,
+    backgroundColor: theme.colors.cards,
+    borderRadius: theme.borderRadius.md,
+    marginBottom: theme.spacing.sm,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  assetDetailLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  assetDetailIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: theme.spacing.md,
+  },
+  assetDetailInfo: {
+    flex: 1,
+  },
+  assetDetailLabel: {
+    fontSize: 16,
+    color: theme.colors.textPrimary,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  assetDetailDescription: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    lineHeight: 16,
+  },
+  assetDetailAmount: {
+    fontSize: 18,
+    color: theme.colors.textPrimary,
+    fontWeight: '700',
+    marginLeft: theme.spacing.md,
+  },
+  emptyAssetsContainer: {
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.lg,
+  },
+  emptyAssetsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginTop: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
+    textAlign: 'center',
+  },
+  emptyAssetsSubtitle: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.lg,
+    lineHeight: 20,
+  },
+  emptyAssetsButton: {
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+  },
+  emptyAssetsButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  assetsBreakdownHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  assetsBreakdownTitle: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  recurringItemDetails: {
+    flex: 1,
+    flexWrap: 'wrap', // Wrap ekle
+    // overflow: 'hidden' kaldırıldı - yazının görünmesini engelleyebilir
+  },
+
+  // Bildirim Sistemi Stilleri
+  notificationsContainer: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.md,
+    marginTop: theme.spacing.sm,
+    ...theme.shadows.medium,
+  },
+  notificationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: theme.spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
+  },
+  notificationIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: theme.spacing.md,
+  },
+  notificationContent: {
+    flex: 1,
+  },
+  notificationTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A202C',
+    marginBottom: 2,
+  },
+  notificationMessage: {
+    fontSize: 12,
+    color: '#4A5568',
+    marginBottom: 4,
+  },
+  notificationTime: {
+    fontSize: 10,
+    color: '#718096',
+  },
+  notificationActions: {
+    flexDirection: 'row',
+    gap: theme.spacing.xs,
+  },
+  notificationButton: {
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.borderRadius.sm,
+    minWidth: 60,
+  },
+  confirmButton: {
+    backgroundColor: '#48BB78',
+  },
+  confirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  rejectButton: {
+    backgroundColor: '#F56565',
+  },
+  rejectButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  showMoreButton: {
+    paddingVertical: theme.spacing.sm,
+    alignItems: 'center',
+  },
+  showMoreButtonText: {
+    fontSize: 12,
+    color: theme.colors.primary,
+    fontWeight: '600',
+  },
+  noNotificationsContainer: {
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xl,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: theme.borderRadius.lg,
+    marginTop: theme.spacing.sm,
+    ...theme.shadows.medium,
+  },
+  noNotificationsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A202C',
+    marginTop: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
+    textAlign: 'center',
+  },
+  noNotificationsSubtitle: {
+    fontSize: 14,
+    color: '#4A5568',
+    textAlign: 'center',
+    paddingHorizontal: theme.spacing.lg,
+    lineHeight: 20,
+  },
+
+  // Modal Bildirim Stilleri
+  modalNotificationItem: {
+    backgroundColor: theme.colors.cards,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.lg,
+    marginBottom: theme.spacing.md,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  modalNotificationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  modalNotificationIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: theme.spacing.md,
+  },
+  modalNotificationInfo: {
+    flex: 1,
+  },
+  modalNotificationTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginBottom: 4,
+  },
+  modalNotificationTime: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+  },
+  modalNotificationMessage: {
+    fontSize: 14,
+    color: theme.colors.textPrimary,
+    lineHeight: 20,
+    marginBottom: theme.spacing.md,
+  },
+  modalNotificationActions: {
+    flexDirection: 'row',
+    gap: theme.spacing.md,
+  },
+  modalNotificationButton: {
+    flex: 1,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    alignItems: 'center',
+  },
+  modalConfirmButton: {
+    backgroundColor: '#48BB78',
+  },
+  modalConfirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalRejectButton: {
+    backgroundColor: '#F56565',
+  },
+  modalRejectButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalNoNotificationsContainer: {
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.lg,
+  },
+  modalNoNotificationsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginTop: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
+    textAlign: 'center',
+  },
+  modalNoNotificationsSubtitle: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
 

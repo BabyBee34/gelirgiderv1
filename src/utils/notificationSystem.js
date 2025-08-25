@@ -1,63 +1,67 @@
-// FinanceFlow - Notification System Utility
+// FinanceFlow - Notification System Utility (Legacy Wrapper)
+import notificationService from '../services/notificationService';
 import { Alert } from 'react-native';
 
+// Legacy wrapper for backward compatibility
 export const notificationSystem = {
+  // Initialize the service
+  async initialize() {
+    return await notificationService.initialize();
+  },
+
   // Günlük özet bildirimi
-  showDailySummary: () => {
-    console.log('Günlük özet bildirimi gösteriliyor...');
-    // Burada gerçek push notification gönderilecek
+  showDailySummary: async () => {
+    await notificationService.sendLocalNotification(
+      '📊 Günlük Özet',
+      'Günlük harcama ve gelir özetinizi görüntüleyin.',
+      { type: 'daily_summary', screen: 'Analytics' }
+    );
   },
 
   // Bütçe uyarısı
-  showBudgetAlert: (category, spent, limit) => {
-    const remaining = limit - spent;
+  showBudgetAlert: async (category, spent, limit) => {
     const percentage = (spent / limit) * 100;
-    
-    let message = '';
-    if (percentage >= 90) {
-      message = `⚠️ ${category} kategorisinde bütçenizin %${percentage.toFixed(1)}'i kullanıldı!`;
-    } else if (percentage >= 75) {
-      message = `⚠️ ${category} kategorisinde bütçenizin %${percentage.toFixed(1)}'i kullanıldı.`;
-    }
-    
-    if (message) {
-      Alert.alert('Bütçe Uyarısı', message);
-    }
+    await notificationService.sendBudgetAlert(category, spent, limit, percentage);
   },
 
   // Hedef hatırlatması
-  showGoalReminder: (goal) => {
-    const daysLeft = Math.ceil((new Date(goal.deadline) - new Date()) / (1000 * 60 * 60 * 24));
+  showGoalReminder: async (goal) => {
+    const progress = (goal.current / goal.target) * 100;
+    let milestone;
     
-    if (daysLeft <= 7 && daysLeft > 0) {
-      Alert.alert(
-        'Hedef Hatırlatması',
-        `"${goal.title}" hedefinizin son ${daysLeft} günü kaldı! Mevcut ilerleme: %${((goal.current / goal.target) * 100).toFixed(1)}`
-      );
+    if (progress >= 100) {
+      milestone = 'completed';
+    } else if (progress >= 75) {
+      milestone = '75';
+    } else if (progress >= 50) {
+      milestone = '50';
+    } else if (progress >= 25) {
+      milestone = '25';
+    }
+    
+    if (milestone) {
+      await notificationService.sendGoalProgress(goal, milestone);
     }
   },
 
   // Ödeme hatırlatması
-  showPaymentReminder: (card, dueDate, amount) => {
+  showPaymentReminder: async (card, dueDate, amount) => {
     const daysUntilDue = Math.ceil((new Date(dueDate) - new Date()) / (1000 * 60 * 60 * 24));
     
-    if (daysUntilDue <= 3 && daysUntilDue > 0) {
-      Alert.alert(
-        'Ödeme Hatırlatması',
-        `${card.name} kartınızın ${daysUntilDue} gün sonra ${amount} TL ödemesi var.`
-      );
+    if (daysUntilDue <= 3 && daysUntilDue >= 0) {
+      const payment = {
+        id: card.id || Date.now(),
+        name: card.name,
+        amount: amount
+      };
+      
+      await notificationService.sendPaymentReminder(payment, daysUntilDue);
     }
   },
 
   // Yeni işlem bildirimi
-  showTransactionNotification: (transaction) => {
-    const type = transaction.type === 'income' ? 'Gelir' : 'Gider';
-    const icon = transaction.type === 'income' ? '💰' : '💸';
-    
-    Alert.alert(
-      'Yeni İşlem',
-      `${icon} ${type}: ${transaction.description}\nTutar: ${transaction.amount} TL\nKategori: ${transaction.category}`
-    );
+  showTransactionNotification: async (transaction) => {
+    await notificationService.sendTransactionNotification(transaction);
   },
 
   // Başarı bildirimi
@@ -76,32 +80,33 @@ export const notificationSystem = {
   },
 
   // Bildirim ayarlarını güncelle
-  updateNotificationSettings: (settings) => {
-    console.log('Bildirim ayarları güncellendi:', settings);
+  updateNotificationSettings: async (settings) => {
+    await notificationService.updateSettings(settings);
     return true;
   },
 
   // Bildirim durumunu kontrol et
   checkNotificationStatus: () => {
+    const settings = notificationService.getSettings();
     return {
-      isEnabled: true,
+      isEnabled: settings.enabled,
       lastNotification: new Date().toISOString(),
       notificationCount: 15,
-      categories: {
-        budget: true,
-        goals: true,
-        payments: true,
-        transactions: true,
-        general: true
-      }
+      categories: settings.categories
     };
   },
 
   // Test bildirimi gönder
-  sendTestNotification: () => {
-    Alert.alert(
-      'Test Bildirimi',
-      'Bu bir test bildirimidir. Bildirim sistemi çalışıyor! 🎉'
-    );
-  }
+  sendTestNotification: async () => {
+    await notificationService.sendTestNotification();
+  },
+
+  // Get notification service instance
+  getService: () => notificationService
 };
+
+// Direct access to notification service
+export { notificationService };
+
+// Default export for backward compatibility
+export default notificationSystem;

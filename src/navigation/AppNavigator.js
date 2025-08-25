@@ -16,6 +16,7 @@ import TransactionsScreen from '../screens/main/TransactionsScreen';
 import AnalyticsScreen from '../screens/main/AnalyticsScreen';
 import CardsScreen from '../screens/main/CardsScreen';
 import ProfileScreen from '../screens/main/ProfileScreen';
+import ScanScreen from '../screens/main/ScanScreen';
 import GoldCurrencyScreen from '../screens/main/GoldCurrencyScreen';
 import BudgetScreen from '../screens/main/BudgetScreen';
 
@@ -88,6 +89,9 @@ const MainTabs = () => {
             case 'Transactions':
               iconName = 'receipt';
               break;
+            case 'Scan':
+              iconName = 'camera-alt';
+              break;
             case 'Analytics':
               iconName = 'analytics';
               break;
@@ -99,6 +103,28 @@ const MainTabs = () => {
               break;
             default:
               iconName = 'circle';
+          }
+
+          // Scan button için özel görüntü
+          if (route.name === 'Scan') {
+            return (
+              <View style={{
+                width: 60,
+                height: 60,
+                borderRadius: 30,
+                backgroundColor: focused ? theme.colors.primary : theme.colors.secondary,
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: 20,
+                elevation: 8,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 8,
+              }}>
+                <MaterialIcons name={iconName} size={28} color="#FFFFFF" />
+              </View>
+            );
           }
 
           return (
@@ -115,7 +141,7 @@ const MainTabs = () => {
           borderTopWidth: 1,
           borderTopColor: '#E2E8F0',
           paddingVertical: 8,
-          height: 70,
+          height: 80,
           elevation: 8,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -2 },
@@ -142,6 +168,14 @@ const MainTabs = () => {
         name="Transactions" 
         component={TransactionsScreen}
         options={{ tabBarLabel: 'İşlemler' }}
+      />
+      <Tab.Screen 
+        name="Scan" 
+        component={ScanScreen}
+        options={{ 
+          tabBarLabel: 'Tarama',
+          tabBarIconStyle: { marginBottom: 0 }
+        }}
       />
       <Tab.Screen 
         name="Analytics" 

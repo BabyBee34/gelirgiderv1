@@ -40,6 +40,11 @@ const AnalyticsScreen = ({ navigation }) => {
   const [topExpenseCategories, setTopExpenseCategories] = useState([]);
   const [topIncomeCategories, setTopIncomeCategories] = useState([]);
   const [insights, setInsights] = useState([]);
+  const [spendingPatterns, setSpendingPatterns] = useState([]);
+  const [budgetRecommendations, setBudgetRecommendations] = useState([]);
+  const [trendAnalysis, setTrendAnalysis] = useState([]);
+  const [accountAnalysis, setAccountAnalysis] = useState([]);
+  const [smartAlerts, setSmartAlerts] = useState([]);
 
   // Real-time update handler
   const handleRealTimeUpdate = useCallback((payload) => {
@@ -62,11 +67,26 @@ const AnalyticsScreen = ({ navigation }) => {
       setLoading(true);
       setError(null);
       
-      const [summaryResult, expensesResult, incomeResult, insightsResult] = await Promise.all([
+      const [
+        summaryResult, 
+        expensesResult, 
+        incomeResult, 
+        insightsResult,
+        trendResult,
+        accountResult,
+        patternsResult,
+        budgetResult,
+        alertsResult
+      ] = await Promise.all([
         analyticsService.getFinancialSummary(user.id, period, forceRefresh),
         analyticsService.getCategoryAnalysis(user.id, period, 'expense', forceRefresh),
         analyticsService.getCategoryAnalysis(user.id, period, 'income', forceRefresh),
-        analyticsService.getInsights(user.id, period, forceRefresh)
+        analyticsService.getInsights(user.id, period, forceRefresh),
+        analyticsService.getTrendAnalysis(user.id, period, 'expense', forceRefresh),
+        analyticsService.getAccountAnalysis(user.id, period, forceRefresh),
+        analyticsService.getSpendingPatterns(user.id, period, forceRefresh),
+        analyticsService.getBudgetRecommendations(user.id, period, forceRefresh),
+        analyticsService.getSmartAlerts(user.id, forceRefresh)
       ]);
 
       if (summaryResult.success) {
@@ -84,11 +104,33 @@ const AnalyticsScreen = ({ navigation }) => {
       if (insightsResult.success) {
         setInsights(insightsResult.data);
       }
+      
+      if (trendResult.success) {
+        setTrendAnalysis(trendResult.data);
+      }
+      
+      if (accountResult.success) {
+        setAccountAnalysis(accountResult.data);
+      }
+      
+      if (patternsResult.success) {
+        setSpendingPatterns(patternsResult.data);
+      }
+      
+      if (budgetResult.success) {
+        setBudgetRecommendations(budgetResult.data);
+      }
+      
+      if (alertsResult.success) {
+        setSmartAlerts(alertsResult.data);
+      }
 
       // Check for errors
-      const errors = [summaryResult, expensesResult, incomeResult, insightsResult]
-        .filter(result => !result.success)
-        .map(result => result.error);
+      const errors = [
+        summaryResult, expensesResult, incomeResult, insightsResult,
+        trendResult, accountResult, patternsResult, budgetResult, alertsResult
+      ].filter(result => !result.success)
+       .map(result => result.error);
 
       if (errors.length > 0) {
         setError(errors[0]);
@@ -371,6 +413,14 @@ const AnalyticsScreen = ({ navigation }) => {
             <View style={styles.insightContent}>
               <Text style={styles.insightTitle}>{insight.title}</Text>
               <Text style={styles.insightText}>{insight.message}</Text>
+              {insight.actionText && (
+                <TouchableOpacity 
+                  style={styles.insightAction}
+                  onPress={() => insight.onAction && insight.onAction()}
+                >
+                  <Text style={styles.insightActionText}>{insight.actionText}</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         ))
@@ -378,12 +428,162 @@ const AnalyticsScreen = ({ navigation }) => {
     </View>
   );
 
+  const renderSmartAlerts = () => (
+    smartAlerts.length > 0 && (
+      <View style={styles.alertsSection}>
+        <Text style={styles.alertsTitle}>Akıllı Uyarılar</Text>
+        {smartAlerts.map((alert, index) => (
+          <View key={index} style={[
+            styles.alertCard,
+            { 
+              backgroundColor: getAlertColor(alert.severity),
+              borderLeftColor: getAlertBorderColor(alert.severity)
+            }
+          ]}>
+            <MaterialIcons 
+              name={alert.icon} 
+              size={20} 
+              color={getAlertTextColor(alert.severity)} 
+            />
+            <View style={styles.alertContent}>
+              <Text style={[styles.alertText, { color: getAlertTextColor(alert.severity) }]}>
+                {alert.message}
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
+    )
+  );
+
+  const renderSpendingPatterns = () => (
+    spendingPatterns.length > 0 && (
+      <View style={styles.patternsSection}>
+        <Text style={styles.patternsTitle}>Harcama Desenleri</Text>
+        <View style={styles.patternsContainer}>
+          {spendingPatterns.map((pattern, index) => (
+            <View key={index} style={styles.patternCard}>
+              <View style={styles.patternHeader}>
+                <MaterialIcons name={pattern.icon} size={20} color={theme.colors.primary} />
+                <Text style={styles.patternTitle}>{pattern.title}</Text>
+              </View>
+              <Text style={styles.patternDescription}>{pattern.description}</Text>
+              <View style={styles.patternStats}>
+                <Text style={styles.patternValue}>{pattern.value}</Text>
+                <Text style={styles.patternTrend}>{pattern.trend}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+    )
+  );
+
+  const renderBudgetRecommendations = () => (
+    budgetRecommendations.length > 0 && (
+      <View style={styles.budgetSection}>
+        <Text style={styles.budgetTitle}>Bütçe Önerileri</Text>
+        {budgetRecommendations.map((recommendation, index) => (
+          <View key={index} style={styles.budgetCard}>
+            <View style={styles.budgetHeader}>
+              <MaterialIcons name={recommendation.icon} size={24} color={recommendation.color} />
+              <View style={styles.budgetInfo}>
+                <Text style={styles.budgetCategory}>{recommendation.category}</Text>
+                <Text style={styles.budgetRecommendation}>{recommendation.recommendation}</Text>
+              </View>
+              <Text style={styles.budgetAmount}>{formatCurrency(recommendation.suggestedAmount)}</Text>
+            </View>
+            <View style={styles.budgetProgress}>
+              <View style={styles.budgetProgressBar}>
+                <View style={[
+                  styles.budgetProgressFill,
+                  { 
+                    width: `${Math.min(recommendation.currentPercentage, 100)}%`,
+                    backgroundColor: recommendation.currentPercentage > 100 ? '#F56565' : recommendation.color
+                  }
+                ]} />
+              </View>
+              <Text style={styles.budgetPercentage}>
+                %{recommendation.currentPercentage.toFixed(0)}
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
+    )
+  );
+
+  const renderTrendAnalysis = () => (
+    trendAnalysis.length > 0 && (
+      <View style={styles.trendSection}>
+        <Text style={styles.trendTitle}>Harcama Trendi</Text>
+        <View style={styles.trendContainer}>
+          <View style={styles.trendChart}>
+            {trendAnalysis.map((point, index) => {
+              const maxAmount = Math.max(...trendAnalysis.map(t => t.amount));
+              const height = maxAmount > 0 ? (point.amount / maxAmount) * 100 : 0;
+              return (
+                <View key={index} style={styles.trendBar}>
+                  <View style={[
+                    styles.trendBarFill,
+                    { 
+                      height: `${height}%`,
+                      backgroundColor: index === trendAnalysis.length - 1 ? theme.colors.primary : theme.colors.secondary
+                    }
+                  ]} />
+                  <Text style={styles.trendLabel}>
+                    {new Date(point.period).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' })}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+          <View style={styles.trendSummary}>
+            <Text style={styles.trendSummaryText}>
+              Son 7 günde ortalama: {formatCurrency(
+                trendAnalysis.slice(-7).reduce((sum, t) => sum + t.amount, 0) / Math.min(7, trendAnalysis.length)
+              )}
+            </Text>
+          </View>
+        </View>
+      </View>
+    )
+  );
+
   const getInsightColor = (type) => {
     switch (type) {
       case 'success': return '#48BB78';
       case 'warning': return '#ED8936';
       case 'danger': return '#F56565';
+      case 'info': return '#4299E1';
       default: return theme.colors.primary;
+    }
+  };
+
+  const getAlertColor = (severity) => {
+    switch (severity) {
+      case 'high': return '#FED7D7';
+      case 'medium': return '#FEEBC8';
+      case 'low': return '#D6F5EA';
+      default: return '#EDF2F7';
+    }
+  };
+
+  const getAlertBorderColor = (severity) => {
+    switch (severity) {
+      case 'high': return '#F56565';
+      case 'medium': return '#ED8936';
+      case 'low': return '#48BB78';
+      default: return theme.colors.primary;
+    }
+  };
+
+  const getAlertTextColor = (severity) => {
+    switch (severity) {
+      case 'high': return '#C53030';
+      case 'medium': return '#C05621';
+      case 'low': return '#2F855A';
+      default: return theme.colors.textPrimary;
     }
   };
 
@@ -427,17 +627,29 @@ const AnalyticsScreen = ({ navigation }) => {
         {/* Last Updated Info */}
         {renderLastUpdated()}
 
+        {/* Smart Alerts */}
+        {renderSmartAlerts()}
+
         {/* Period Selector */}
         {renderPeriodSelector()}
 
         {/* Financial Summary */}
         {renderFinancialSummary()}
 
+        {/* Trend Analysis */}
+        {renderTrendAnalysis()}
+
+        {/* Spending Patterns */}
+        {renderSpendingPatterns()}
+
         {/* Expense Categories Chart */}
         {renderCategoryChart('En Yüksek Gider Kategorileri', topExpenseCategories, 'expense')}
 
         {/* Income Categories Chart */}
         {renderCategoryChart('En Yüksek Gelir Kategorileri', topIncomeCategories, 'income')}
+
+        {/* Budget Recommendations */}
+        {renderBudgetRecommendations()}
 
         {/* Insights */}
         {renderInsights()}
@@ -811,6 +1023,265 @@ const styles = StyleSheet.create({
 
   bottomPadding: {
     height: 100,
+  },
+
+  // New styles for advanced analytics
+  alertsSection: {
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.lg,
+  },
+
+  alertsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.md,
+    marginLeft: theme.spacing.sm,
+  },
+
+  alertCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    marginBottom: theme.spacing.sm,
+    borderLeftWidth: 4,
+  },
+
+  alertContent: {
+    flex: 1,
+    marginLeft: theme.spacing.sm,
+  },
+
+  alertText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+
+  patternsSection: {
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.lg,
+  },
+
+  patternsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.md,
+    marginLeft: theme.spacing.sm,
+  },
+
+  patternsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+
+  patternCard: {
+    width: (width - theme.spacing.lg * 2 - theme.spacing.md) / 2,
+    backgroundColor: '#FFFFFF',
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.lg,
+    marginBottom: theme.spacing.md,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+
+  patternHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.sm,
+  },
+
+  patternTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginLeft: theme.spacing.xs,
+  },
+
+  patternDescription: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.sm,
+    lineHeight: 16,
+  },
+
+  patternStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  patternValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+  },
+
+  patternTrend: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: theme.colors.success,
+  },
+
+  budgetSection: {
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.lg,
+  },
+
+  budgetTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.md,
+    marginLeft: theme.spacing.sm,
+  },
+
+  budgetCard: {
+    backgroundColor: '#FFFFFF',
+    padding: theme.spacing.lg,
+    borderRadius: theme.borderRadius.lg,
+    marginBottom: theme.spacing.md,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+
+  budgetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+  },
+
+  budgetInfo: {
+    flex: 1,
+    marginLeft: theme.spacing.sm,
+  },
+
+  budgetCategory: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginBottom: 2,
+  },
+
+  budgetRecommendation: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+  },
+
+  budgetAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.primary,
+  },
+
+  budgetProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  budgetProgressBar: {
+    flex: 1,
+    height: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginRight: theme.spacing.sm,
+  },
+
+  budgetProgressFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+
+  budgetPercentage: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.textSecondary,
+    minWidth: 40,
+    textAlign: 'right',
+  },
+
+  trendSection: {
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.lg,
+  },
+
+  trendTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.md,
+    marginLeft: theme.spacing.sm,
+  },
+
+  trendContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing.lg,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+
+  trendChart: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    height: 120,
+    marginBottom: theme.spacing.md,
+  },
+
+  trendBar: {
+    flex: 1,
+    alignItems: 'center',
+    marginHorizontal: 2,
+  },
+
+  trendBarFill: {
+    width: '80%',
+    minHeight: 4,
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 2,
+    marginBottom: theme.spacing.xs,
+  },
+
+  trendLabel: {
+    fontSize: 10,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+  },
+
+  trendSummary: {
+    paddingTop: theme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+
+  trendSummaryText: {
+    fontSize: 14,
+    color: theme.colors.textPrimary,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+
+  insightAction: {
+    marginTop: theme.spacing.sm,
+    alignSelf: 'flex-start',
+  },
+
+  insightActionText: {
+    fontSize: 14,
+    color: theme.colors.primary,
+    fontWeight: '600',
   },
 });
 

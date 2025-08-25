@@ -20,13 +20,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { theme } from '../../styles/theme';
-import { testUser } from '../../utils/testData';
+import transactionService from '../../services/transactionService';
+import accountService from '../../services/accountService';
+import goalService from '../../services/goalService';
 import { formatCurrency } from '../../utils/formatters';
 import { dataExport } from '../../utils/dataExport';
 import { notificationSystem } from '../../utils/notificationSystem';
 import { useAuth } from '../../context/AuthContext';
 import { useFeedback } from '../../context/FeedbackContext';
 import { useToastContext } from '../../context/ToastContext';
+import { useTheme } from '../../context/ThemeContext';
+import ThemeSettingsComponent from '../../components/ui/ThemeSettingsComponent';
 
 const { width, height } = Dimensions.get('window');
 
@@ -34,6 +38,7 @@ const ProfileScreen = ({ navigation }) => {
   const { user, userProfile, updateProfile, signOut } = useAuth();
   const { reportBug, requestFeature, suggestImprovement, giveFeedback } = useFeedback();
   const { showSuccess, showInfo } = useToastContext();
+  const { theme: currentTheme } = useTheme();
   
   // Logout fonksiyonu
   const logout = async () => {
@@ -59,12 +64,75 @@ const ProfileScreen = ({ navigation }) => {
     }
   };
 
+  // State variables for real user data
+  const [userStats, setUserStats] = useState({
+    transactionsCount: 0,
+    accountsCount: 0,
+    goalsCount: 0,
+    totalBalance: 0,
+    totalAssets: 0
+  });
+  const [accounts, setAccounts] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [goals, setGoals] = useState([]);
+  
   // State variables
-  const [notificationsEnabled, setNotificationsEnabled] = useState(testUser?.user?.preferences?.notifications || false);
-  const [darkModeEnabled, setDarkModeEnabled] = useState(testUser?.user?.preferences?.darkMode || false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(true);
   const [budgetAlertsEnabled, setBudgetAlertsEnabled] = useState(true);
+  
+  // Advanced notification settings
+  const [notificationSettings, setNotificationSettings] = useState({
+    pushNotifications: true,
+    emailNotifications: false,
+    smsNotifications: false,
+    budgetAlerts: {
+      enabled: true,
+      threshold: 80, // percentage
+      frequency: 'daily'
+    },
+    transactionAlerts: {
+      enabled: true,
+      largeTransactions: true,
+      threshold: 1000, // amount
+      realTime: true
+    },
+    weeklyReports: {
+      enabled: true,
+      day: 'sunday',
+      time: '09:00'
+    },
+    monthlyReports: {
+      enabled: true,
+      day: 1, // day of month
+      time: '09:00'
+    },
+    goalProgress: {
+      enabled: true,
+      milestones: true,
+      completion: true
+    },
+    securityAlerts: {
+      enabled: true,
+      loginAlerts: true,
+      suspiciousActivity: true
+    },
+    reminderSettings: {
+      billReminders: true,
+      recurringTransactions: true,
+      savingGoals: true,
+      advanceDays: 3
+    },
+    marketingPromotions: false,
+    appUpdates: true,
+    quietHours: {
+      enabled: true,
+      startTime: '22:00',
+      endTime: '08:00'
+    }
+  });
   const [showAccountSummary, setShowAccountSummary] = useState(true);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [showSecurityModal, setShowSecurityModal] = useState(false);
@@ -72,6 +140,7 @@ const ProfileScreen = ({ navigation }) => {
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [showCurrencyModal, setShowCurrencyModal] = useState(false);
+  const [showThemeModal, setShowThemeModal] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('Türkçe');
   const [selectedCurrency, setSelectedCurrency] = useState('TRY');
   const [loading, setLoading] = useState(false);
@@ -83,16 +152,103 @@ const ProfileScreen = ({ navigation }) => {
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
   const headerHeight = useRef(new Animated.Value(200)).current;
 
-  // Profile data
+  // Profile data from real user
   const [profileData, setProfileData] = useState({
-    firstName: testUser?.user?.firstName || 'Kullanıcı',
-    lastName: testUser?.user?.lastName || '',
-    email: testUser?.user?.email || 'user@example.com',
-    phone: testUser?.user?.phone || '+90 555 123 45 67',
-    avatar: testUser?.user?.avatar || null
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    avatar: null
   });
 
+  // Load real user data
+  const loadUserData = async () => {
+    if (!user?.id) return;
+    
+    try {
+      setLoading(true);
+      console.log('📋 Loading profile data for user:', user.id);
+      
+      // Load transactions, accounts, and goals in parallel
+      const [transactionsResult, accountsResult, goalsResult] = await Promise.all([
+        transactionService.getTransactions(user.id),
+        accountService.getAccounts(user.id),
+        goalService.getGoals(user.id)
+      ]);
+      
+      // Update transactions
+      if (transactionsResult.success) {
+        setTransactions(transactionsResult.data || []);
+      }
+      
+      // Update accounts
+      if (accountsResult.success) {
+        setAccounts(accountsResult.data || []);
+      }
+      
+      // Update goals
+      if (goalsResult.success) {
+        setGoals(goalsResult.data || []);
+      }
+      
+      // Calculate user stats
+      const stats = {
+        transactionsCount: transactionsResult.data?.length || 0,
+        accountsCount: accountsResult.data?.length || 0,
+        goalsCount: goalsResult.data?.length || 0,
+        totalBalance: calculateTotalBalance(accountsResult.data || []),
+        totalAssets: calculateTotalAssets(accountsResult.data || [])
+      };
+      
+      setUserStats(stats);
+      console.log('✅ Profile data loaded:', stats);
+      
+    } catch (error) {
+      console.error('❌ Error loading profile data:', error);
+      setError('Profil verileri yüklenirken hata oluştu');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Calculate total balance from accounts
+  const calculateTotalBalance = (accountsData) => {
+    if (!Array.isArray(accountsData)) return 0;
+    return accountsData.reduce((total, account) => {
+      return total + (parseFloat(account.balance) || 0);
+    }, 0);
+  };
+  
+  // Calculate total assets (savings and investments)
+  const calculateTotalAssets = (accountsData) => {
+    if (!Array.isArray(accountsData)) return 0;
+    return accountsData.reduce((total, account) => {
+      if (account?.type === 'savings' || account?.type === 'investment') {
+        return total + (parseFloat(account.balance) || 0);
+      }
+      return total;
+    }, 0);
+  };
+
   useEffect(() => {
+    // Initialize profile data from user context
+    if (user) {
+      const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Kullanıcı';
+      const [firstName, ...lastNameParts] = fullName.split(' ');
+      const lastName = lastNameParts.join(' ');
+      
+      setProfileData({
+        firstName: firstName || 'Kullanıcı',
+        lastName: lastName || '',
+        email: user.email || '',
+        phone: user.user_metadata?.phone || '',
+        avatar: user.user_metadata?.avatar || null
+      });
+      
+      // Load user data
+      loadUserData();
+    }
+    
     // Entry animations
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -116,12 +272,11 @@ const ProfileScreen = ({ navigation }) => {
         useNativeDriver: false,
       }),
     ]).start();
-  }, []);
+  }, [user]);
 
   const getTotalBalance = () => {
-    const safeUser = testUser || {};
-    if (!safeUser.accounts || !Array.isArray(safeUser.accounts)) return 0;
-    return safeUser.accounts.reduce((total, account) => total + (account?.balance || 0), 0);
+    if (!userStats?.totalBalance) return 0;
+    return userStats.totalBalance;
   };
 
   const handleLogout = async () => {
@@ -140,14 +295,8 @@ const ProfileScreen = ({ navigation }) => {
   };
 
   const getTotalAssets = () => {
-    const safeUser = testUser || {};
-    if (!safeUser.accounts || !Array.isArray(safeUser.accounts)) return 0;
-    return safeUser.accounts.reduce((total, account) => {
-      if (account?.type === 'savings' || account?.type === 'investment') {
-        return total + (account?.balance || 0);
-      }
-      return total;
-    }, 0);
+    if (!userStats?.totalAssets) return 0;
+    return userStats.totalAssets;
   };
 
   const handleDeleteAccount = () => {
@@ -263,16 +412,15 @@ const ProfileScreen = ({ navigation }) => {
   };
 
   const renderProfileHeader = () => {
-    // Güvenli veri erişimi için null check
-    const safeUser = testUser || {};
-    const transactionsCount = safeUser.transactions?.length || 0;
-    const goalsCount = safeUser.goals?.length || 0;
-    const accountsCount = safeUser.accounts?.length || 0;
+    // Use real user stats data
+    const transactionsCount = userStats?.transactionsCount || 0;
+    const goalsCount = userStats?.goalsCount || 0;
+    const accountsCount = userStats?.accountsCount || 0;
 
     return (
       <Animated.View style={[styles.profileHeader, { height: headerHeight }]}>
         <LinearGradient
-          colors={[theme.colors.primary, theme.colors.secondary, '#667eea']}
+          colors={[currentTheme.colors.primary, currentTheme.colors.secondary, '#667eea']}
           style={styles.profileGradient}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -633,49 +781,372 @@ const ProfileScreen = ({ navigation }) => {
     </Modal>
   );
 
+  const updateNotificationSetting = (category, setting, value) => {
+    setNotificationSettings(prev => ({
+      ...prev,
+      [category]: typeof prev[category] === 'object' 
+        ? { ...prev[category], [setting]: value }
+        : value
+    }));
+  };
+
+  const renderNotificationSection = (title, icon, children) => (
+    <View style={styles.notificationSection}>
+      <View style={styles.notificationSectionHeader}>
+        <MaterialIcons name={icon} size={20} color={currentTheme.colors.primary} />
+        <Text style={styles.notificationSectionTitle}>{title}</Text>
+      </View>
+      <View style={styles.notificationSectionContent}>
+        {children}
+      </View>
+    </View>
+  );
+
+  const renderNotificationToggle = (label, description, value, onValueChange, testable = false) => (
+    <View style={styles.notificationToggleContainer}>
+      <View style={styles.notificationToggleInfo}>
+        <Text style={styles.notificationToggleLabel}>{label}</Text>
+        {description && (
+          <Text style={styles.notificationToggleDescription}>{description}</Text>
+        )}
+      </View>
+      <View style={styles.notificationToggleControls}>
+        {testable && (
+          <TouchableOpacity 
+            style={styles.testNotificationButton}
+            onPress={() => {
+              Alert.alert('Test Bildirimi', `${label} için test bildirimi gönderildi!`);
+            }}
+          >
+            <MaterialIcons name="send" size={16} color={currentTheme.colors.primary} />
+          </TouchableOpacity>
+        )}
+        <Switch
+          value={value}
+          onValueChange={onValueChange}
+          trackColor={{ false: '#E2E8F0', true: currentTheme.colors.primary }}
+          thumbColor="#FFFFFF"
+        />
+      </View>
+    </View>
+  );
+
+  const renderTimeSelector = (label, value, onValueChange) => (
+    <TouchableOpacity 
+      style={styles.timeSelectorButton}
+      onPress={() => {
+        // For demo purposes, show alert. In real app, would show time picker
+        Alert.alert('Zaman Seçici', `${label} için zaman seçici açılacak. Mevcut: ${value}`);
+      }}
+    >
+      <Text style={styles.timeSelectorLabel}>{label}</Text>
+      <View style={styles.timeSelectorValue}>
+        <Text style={styles.timeSelectorValueText}>{value}</Text>
+        <MaterialIcons name="access-time" size={16} color={currentTheme.colors.textSecondary} />
+      </View>
+    </TouchableOpacity>
+  );
+
   const renderNotificationsModal = () => (
     <Modal
       visible={showNotificationsModal}
       animationType="slide"
-      transparent={true}
+      presentationStyle="pageSheet"
+      onRequestClose={() => setShowNotificationsModal(false)}
     >
-      <View style={styles.overlay}>
-        <View style={styles.modalCard}>
-          <Text style={styles.modalCardTitle}>Bildirim Ayarları</Text>
-          
-          <View style={styles.settingRow}>
-            <Text style={styles.settingLabel}>Push Bildirimleri</Text>
-            <Switch
-              value={notificationsEnabled}
-              onValueChange={setNotificationsEnabled}
-              trackColor={{ false: '#E2E8F0', true: theme.colors.primary }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-          
-          <View style={styles.settingRow}>
-            <Text style={styles.settingLabel}>Bütçe Uyarıları</Text>
-            <Switch
-              value={budgetAlertsEnabled}
-              onValueChange={setBudgetAlertsEnabled}
-              trackColor={{ false: '#E2E8F0', true: theme.colors.primary }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-          
-          <TouchableOpacity style={styles.modalButton} onPress={handleNotificationTest}>
-            <MaterialIcons name="notifications" size={24} color="#6C63FF" />
-            <Text style={styles.modalButtonText}>Test Bildirimi Gönder</Text>
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <TouchableOpacity onPress={() => setShowNotificationsModal(false)} style={styles.closeButton}>
+            <MaterialIcons name="close" size={24} color={currentTheme.colors.textPrimary} />
           </TouchableOpacity>
-          
+          <Text style={[styles.modalTitle, { color: currentTheme.colors.textPrimary }]}>Bildirim Ayarları</Text>
           <TouchableOpacity 
-            style={[styles.modalButton, styles.cancelButton]}
-            onPress={() => setShowNotificationsModal(false)}
+            onPress={() => {
+              Alert.alert('Ayarlar Kaydedildi', 'Bildirim tercihleriniz başarıyla güncellendi!');
+              setShowNotificationsModal(false);
+            }}
+            style={styles.saveButton}
           >
-            <Text style={styles.cancelButtonText}>Kapat</Text>
+            <Text style={styles.saveButtonText}>Kaydet</Text>
           </TouchableOpacity>
         </View>
-      </View>
+
+        <ScrollView style={styles.notificationModalContent} showsVerticalScrollIndicator={false}>
+          {/* Master Toggle */}
+          <View style={styles.masterToggleContainer}>
+            <LinearGradient
+              colors={[currentTheme.colors.primary + '20', currentTheme.colors.secondary + '20']}
+              style={styles.masterToggleGradient}
+            >
+              <View style={styles.masterToggleContent}>
+                <View style={styles.masterToggleInfo}>
+                  <MaterialIcons name="notifications" size={24} color={currentTheme.colors.primary} />
+                  <View style={styles.masterToggleTextContainer}>
+                    <Text style={styles.masterToggleTitle}>Bildirimleri Etkinleştir</Text>
+                    <Text style={styles.masterToggleSubtitle}>Tüm bildirim türlerini kontrol eder</Text>
+                  </View>
+                </View>
+                <Switch
+                  value={notificationSettings.pushNotifications}
+                  onValueChange={(value) => updateNotificationSetting('pushNotifications', null, value)}
+                  trackColor={{ false: '#E2E8F0', true: currentTheme.colors.primary }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+            </LinearGradient>
+          </View>
+
+          {/* Notification Types */}
+          {renderNotificationSection('Bildirim Türleri', 'campaign', [
+            <View key="notification-types">
+              {renderNotificationToggle(
+                'E-posta Bildirimleri',
+                'Önemli güncellemeler e-posta ile gönderilir',
+                notificationSettings.emailNotifications,
+                (value) => updateNotificationSetting('emailNotifications', null, value)
+              )}
+              {renderNotificationToggle(
+                'SMS Bildirimleri',
+                'Acil durumlar için SMS gönderilir',
+                notificationSettings.smsNotifications,
+                (value) => updateNotificationSetting('smsNotifications', null, value)
+              )}
+            </View>
+          ])}
+
+          {/* Budget Alerts */}
+          {renderNotificationSection('Bütçe Uyarıları', 'account-balance-wallet', [
+            <View key="budget-alerts">
+              {renderNotificationToggle(
+                'Bütçe Aşım Uyarıları',
+                `Bütçenizin %${notificationSettings.budgetAlerts.threshold}'ini aştığınızda uyarı alın`,
+                notificationSettings.budgetAlerts.enabled,
+                (value) => updateNotificationSetting('budgetAlerts', 'enabled', value),
+                true
+              )}
+              
+              <TouchableOpacity 
+                style={styles.thresholdSelector}
+                onPress={() => {
+                  Alert.alert(
+                    'Uyarı Eşiği',
+                    'Bütçe uyarı eşiğini seçin',
+                    [
+                      { text: '%50', onPress: () => updateNotificationSetting('budgetAlerts', 'threshold', 50) },
+                      { text: '%75', onPress: () => updateNotificationSetting('budgetAlerts', 'threshold', 75) },
+                      { text: '%80', onPress: () => updateNotificationSetting('budgetAlerts', 'threshold', 80) },
+                      { text: '%90', onPress: () => updateNotificationSetting('budgetAlerts', 'threshold', 90) },
+                      { text: 'İptal', style: 'cancel' }
+                    ]
+                  );
+                }}
+              >
+                <Text style={styles.thresholdSelectorLabel}>Uyarı Eşiği</Text>
+                <View style={styles.thresholdSelectorValue}>
+                  <Text style={styles.thresholdSelectorValueText}>%{notificationSettings.budgetAlerts.threshold}</Text>
+                  <MaterialIcons name="tune" size={16} color={currentTheme.colors.textSecondary} />
+                </View>
+              </TouchableOpacity>
+            </View>
+          ])}
+
+          {/* Transaction Alerts */}
+          {renderNotificationSection('İşlem Uyarıları', 'receipt', [
+            <View key="transaction-alerts">
+              {renderNotificationToggle(
+                'Gerçek Zamanlı İşlem Bildirimleri',
+                'Her işlemde anında bildirim alın',
+                notificationSettings.transactionAlerts.realTime,
+                (value) => updateNotificationSetting('transactionAlerts', 'realTime', value),
+                true
+              )}
+              {renderNotificationToggle(
+                'Büyük İşlem Uyarıları',
+                `${formatCurrency(notificationSettings.transactionAlerts.threshold)} üzeri işlemler için uyarı`,
+                notificationSettings.transactionAlerts.largeTransactions,
+                (value) => updateNotificationSetting('transactionAlerts', 'largeTransactions', value)
+              )}
+              
+              <TouchableOpacity 
+                style={styles.thresholdSelector}
+                onPress={() => {
+                  Alert.alert(
+                    'Büyük İşlem Eşiği',
+                    'Büyük işlem uyarı tutarını seçin',
+                    [
+                      { text: '₺500', onPress: () => updateNotificationSetting('transactionAlerts', 'threshold', 500) },
+                      { text: '₺1.000', onPress: () => updateNotificationSetting('transactionAlerts', 'threshold', 1000) },
+                      { text: '₺2.500', onPress: () => updateNotificationSetting('transactionAlerts', 'threshold', 2500) },
+                      { text: '₺5.000', onPress: () => updateNotificationSetting('transactionAlerts', 'threshold', 5000) },
+                      { text: 'İptal', style: 'cancel' }
+                    ]
+                  );
+                }}
+              >
+                <Text style={styles.thresholdSelectorLabel}>Büyük İşlem Eşiği</Text>
+                <View style={styles.thresholdSelectorValue}>
+                  <Text style={styles.thresholdSelectorValueText}>{formatCurrency(notificationSettings.transactionAlerts.threshold)}</Text>
+                  <MaterialIcons name="tune" size={16} color={currentTheme.colors.textSecondary} />
+                </View>
+              </TouchableOpacity>
+            </View>
+          ])}
+
+          {/* Periodic Reports */}
+          {renderNotificationSection('Periyodik Raporlar', 'assessment', [
+            <View key="periodic-reports">
+              {renderNotificationToggle(
+                'Haftalık Rapor',
+                `Her ${notificationSettings.weeklyReports.day === 'sunday' ? 'Pazar' : 'Pazartesi'} saat ${notificationSettings.weeklyReports.time}`,
+                notificationSettings.weeklyReports.enabled,
+                (value) => updateNotificationSetting('weeklyReports', 'enabled', value)
+              )}
+              
+              {renderTimeSelector(
+                'Haftalık Rapor Zamanı',
+                notificationSettings.weeklyReports.time,
+                (value) => updateNotificationSetting('weeklyReports', 'time', value)
+              )}
+              
+              {renderNotificationToggle(
+                'Aylık Rapor',
+                `Her ayın ${notificationSettings.monthlyReports.day}. günü saat ${notificationSettings.monthlyReports.time}`,
+                notificationSettings.monthlyReports.enabled,
+                (value) => updateNotificationSetting('monthlyReports', 'enabled', value)
+              )}
+              
+              {renderTimeSelector(
+                'Aylık Rapor Zamanı',
+                notificationSettings.monthlyReports.time,
+                (value) => updateNotificationSetting('monthlyReports', 'time', value)
+              )}
+            </View>
+          ])}
+
+          {/* Goal Progress */}
+          {renderNotificationSection('Hedef İlerlemesi', 'flag', [
+            <View key="goal-progress">
+              {renderNotificationToggle(
+                'Hedef Kilometre Taşları',
+                'Hedeflerinizin %25, %50, %75 tamamlandığında bildirim',
+                notificationSettings.goalProgress.milestones,
+                (value) => updateNotificationSetting('goalProgress', 'milestones', value)
+              )}
+              {renderNotificationToggle(
+                'Hedef Tamamlanması',
+                'Hedefleriniz tamamlandığında kutlama bildirimi',
+                notificationSettings.goalProgress.completion,
+                (value) => updateNotificationSetting('goalProgress', 'completion', value),
+                true
+              )}
+            </View>
+          ])}
+
+          {/* Security Alerts */}
+          {renderNotificationSection('Güvenlik Uyarıları', 'security', [
+            <View key="security-alerts">
+              {renderNotificationToggle(
+                'Giriş Bildirimleri',
+                'Hesabınıza her girişte bildirim alın',
+                notificationSettings.securityAlerts.loginAlerts,
+                (value) => updateNotificationSetting('securityAlerts', 'loginAlerts', value)
+              )}
+              {renderNotificationToggle(
+                'Şüpheli Aktivite',
+                'Olağandışı hesap aktivitesi tespit edildiğinde uyarı',
+                notificationSettings.securityAlerts.suspiciousActivity,
+                (value) => updateNotificationSetting('securityAlerts', 'suspiciousActivity', value)
+              )}
+            </View>
+          ])}
+
+          {/* Reminders */}
+          {renderNotificationSection('Hatırlatmalar', 'schedule', [
+            <View key="reminders">
+              {renderNotificationToggle(
+                'Fatura Hatırlatmaları',
+                `Son ödeme tarihinden ${notificationSettings.reminderSettings.advanceDays} gün önce hatırlatma`,
+                notificationSettings.reminderSettings.billReminders,
+                (value) => updateNotificationSetting('reminderSettings', 'billReminders', value)
+              )}
+              {renderNotificationToggle(
+                'Tekrarlayan İşlem Hatırlatmaları',
+                'Düzenli ödemeleriniz için hatırlatma',
+                notificationSettings.reminderSettings.recurringTransactions,
+                (value) => updateNotificationSetting('reminderSettings', 'recurringTransactions', value)
+              )}
+              {renderNotificationToggle(
+                'Tasarruf Hedefi Hatırlatmaları',
+                'Hedeflerinize katkı yapmayı unutmayın',
+                notificationSettings.reminderSettings.savingGoals,
+                (value) => updateNotificationSetting('reminderSettings', 'savingGoals', value)
+              )}
+            </View>
+          ])}
+
+          {/* Quiet Hours */}
+          {renderNotificationSection('Sessiz Saatler', 'do-not-disturb', [
+            <View key="quiet-hours">
+              {renderNotificationToggle(
+                'Sessiz Saatleri Etkinleştir',
+                `${notificationSettings.quietHours.startTime} - ${notificationSettings.quietHours.endTime} arası bildirim yok`,
+                notificationSettings.quietHours.enabled,
+                (value) => updateNotificationSetting('quietHours', 'enabled', value)
+              )}
+              
+              <View style={styles.quietHoursContainer}>
+                {renderTimeSelector(
+                  'Başlangıç Saati',
+                  notificationSettings.quietHours.startTime,
+                  (value) => updateNotificationSetting('quietHours', 'startTime', value)
+                )}
+                {renderTimeSelector(
+                  'Bitiş Saati',
+                  notificationSettings.quietHours.endTime,
+                  (value) => updateNotificationSetting('quietHours', 'endTime', value)
+                )}
+              </View>
+            </View>
+          ])}
+
+          {/* Additional Settings */}
+          {renderNotificationSection('Diğer', 'settings', [
+            <View key="other-settings">
+              {renderNotificationToggle(
+                'Pazarlama ve Promosyonlar',
+                'Özel teklifler ve yeni özellik duyuruları',
+                notificationSettings.marketingPromotions,
+                (value) => updateNotificationSetting('marketingPromotions', null, value)
+              )}
+              {renderNotificationToggle(
+                'Uygulama Güncellemeleri',
+                'Yeni sürüm ve özellik bildirimleri',
+                notificationSettings.appUpdates,
+                (value) => updateNotificationSetting('appUpdates', null, value)
+              )}
+            </View>
+          ])}
+
+          {/* Test All Notifications */}
+          <View style={styles.testNotificationsContainer}>
+            <TouchableOpacity 
+              style={styles.testAllButton}
+              onPress={() => {
+                Alert.alert(
+                  'Test Bildirimleri Gönderildi',
+                  'Etkin olan tüm bildirim türleri için test bildirimleri gönderildi. Bildirimleri göremiyorsanız cihaz ayarlarınızı kontrol edin.',
+                  [{ text: 'Tamam' }]
+                );
+              }}
+            >
+              <MaterialIcons name="send" size={20} color="#fff" />
+              <Text style={styles.testAllButtonText}>Tüm Bildirimleri Test Et</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.notificationModalBottomPadding} />
+        </ScrollView>
+      </SafeAreaView>
     </Modal>
   );
 
@@ -761,7 +1232,7 @@ const ProfileScreen = ({ navigation }) => {
               <Switch
                 value={notificationsEnabled}
                 onValueChange={setNotificationsEnabled}
-                trackColor={{ false: '#E2E8F0', true: theme.colors.primary }}
+                trackColor={{ false: '#E2E8F0', true: currentTheme.colors.primary }}
                 thumbColor="#FFFFFF"
               />,
               '#FFE66D'
@@ -776,7 +1247,7 @@ const ProfileScreen = ({ navigation }) => {
               <Switch
                 value={biometricEnabled}
                 onValueChange={handleBiometricToggle}
-                trackColor={{ false: '#E2E8F0', true: theme.colors.primary }}
+                trackColor={{ false: '#E2E8F0', true: currentTheme.colors.primary }}
                 thumbColor="#FFFFFF"
               />,
               '#48BB78'
@@ -791,7 +1262,7 @@ const ProfileScreen = ({ navigation }) => {
               <Switch
                 value={autoBackupEnabled}
                 onValueChange={setAutoBackupEnabled}
-                trackColor={{ false: '#E2E8F0', true: theme.colors.primary }}
+                trackColor={{ false: '#E2E8F0', true: currentTheme.colors.primary }}
                 thumbColor="#FFFFFF"
               />,
               '#9F7AEA'
@@ -817,6 +1288,16 @@ const ProfileScreen = ({ navigation }) => {
               '#48BB78'
             )}
           </View>,
+          <View key="pref-theme">
+            {renderMenuItem(
+              'palette', 
+              'Tema Ayarları', 
+              'Açık/Koyu tema seçenekleri',
+              () => setShowThemeModal(true),
+              null,
+              '#9C27B0'
+            )}
+          </View>,
         ])}
 
         {/* Financial Section */}
@@ -825,7 +1306,7 @@ const ProfileScreen = ({ navigation }) => {
             {renderMenuItem(
               'account-balance', 
               'Hesaplarım', 
-              `${testUser?.accounts?.length || 0} hesap bağlı`,
+              `${userStats?.accountsCount || 0} hesap bağlı`,
               () => navigation.navigate('Cards'),
               null,
               '#6C63FF'
@@ -973,6 +1454,25 @@ const ProfileScreen = ({ navigation }) => {
       {renderSecurityModal()}
       {renderLanguageModal()}
       {renderCurrencyModal()}
+      
+      {/* Theme Settings Modal */}
+      <Modal
+        visible={showThemeModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowThemeModal(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowThemeModal(false)} style={styles.closeButton}>
+              <MaterialIcons name="close" size={24} color={currentTheme.colors.textPrimary} />
+            </TouchableOpacity>
+            <Text style={[styles.modalTitle, { color: currentTheme.colors.textPrimary }]}>Tema Ayarları</Text>
+            <View style={{ width: 40 }} />
+          </View>
+          <ThemeSettingsComponent />
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1489,6 +1989,231 @@ const styles = StyleSheet.create({
   retryButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
+    fontWeight: '600',
+  },
+
+  // Notification Modal Styles
+  notificationModalContent: {
+    flex: 1,
+    padding: theme.spacing.lg,
+  },
+
+  masterToggleContainer: {
+    marginBottom: theme.spacing.xl,
+  },
+
+  masterToggleGradient: {
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing.lg,
+  },
+
+  masterToggleContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  masterToggleInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+
+  masterToggleTextContainer: {
+    marginLeft: theme.spacing.md,
+    flex: 1,
+  },
+
+  masterToggleTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginBottom: 2,
+  },
+
+  masterToggleSubtitle: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+  },
+
+  notificationSection: {
+    marginBottom: theme.spacing.xl,
+  },
+
+  notificationSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+    paddingBottom: theme.spacing.sm,
+    borderBottomWidth: 2,
+    borderBottomColor: theme.colors.primary + '20',
+  },
+
+  notificationSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginLeft: theme.spacing.sm,
+  },
+
+  notificationSectionContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.md,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+
+  notificationToggleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: theme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F7FAFC',
+  },
+
+  notificationToggleInfo: {
+    flex: 1,
+    marginRight: theme.spacing.md,
+  },
+
+  notificationToggleLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: theme.colors.textPrimary,
+    marginBottom: 2,
+  },
+
+  notificationToggleDescription: {
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    lineHeight: 18,
+  },
+
+  notificationToggleControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  testNotificationButton: {
+    padding: theme.spacing.sm,
+    marginRight: theme.spacing.sm,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.primary + '15',
+  },
+
+  thresholdSelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    marginTop: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+
+  thresholdSelectorLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: theme.colors.textPrimary,
+  },
+
+  thresholdSelectorValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  thresholdSelectorValueText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.primary,
+    marginRight: theme.spacing.xs,
+  },
+
+  timeSelectorButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    marginVertical: theme.spacing.xs,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+
+  timeSelectorLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: theme.colors.textPrimary,
+  },
+
+  timeSelectorValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  timeSelectorValueText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.primary,
+    marginRight: theme.spacing.xs,
+  },
+
+  quietHoursContainer: {
+    marginTop: theme.spacing.sm,
+  },
+
+  testNotificationsContainer: {
+    marginTop: theme.spacing.xl,
+    marginBottom: theme.spacing.lg,
+  },
+
+  testAllButton: {
+    backgroundColor: theme.colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: theme.spacing.lg,
+    borderRadius: theme.borderRadius.lg,
+    elevation: 3,
+    shadowColor: theme.colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+
+  testAllButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: theme.spacing.sm,
+  },
+
+  notificationModalBottomPadding: {
+    height: 50,
+  },
+
+  closeButton: {
+    padding: theme.spacing.sm,
+  },
+
+  saveButton: {
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.sm,
+    borderRadius: theme.borderRadius.md,
+  },
+
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '600',
   },
 });

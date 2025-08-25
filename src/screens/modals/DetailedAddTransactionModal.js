@@ -159,6 +159,37 @@ const DetailedAddTransactionModal = ({
     { value: 'yearly', label: 'Yıllık' },
   ];
 
+  // Seçilen tarihten periyot alanlarını çıkar
+  const computeRecurringFieldsFromDate = (selectedDate) => {
+    const jsDay = selectedDate.getDay(); // 0=Sun ... 6=Sat
+    const day_of_week = jsDay === 0 ? 7 : jsDay; // 1=Mon ... 7=Sun
+    const day_of_month = selectedDate.getDate();
+    const month_of_year = selectedDate.getMonth() + 1; // 1-12
+    return { day_of_week, day_of_month, month_of_year };
+  };
+
+  const turkishWeekDays = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+  const turkishMonths = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+
+  const getScheduleInfoText = () => {
+    const { day_of_week, day_of_month, month_of_year } = computeRecurringFieldsFromDate(date);
+    if (recurringFrequency === 'daily') {
+      return 'Bu işlem her gün otomatik olarak tekrarlanacaktır.';
+    }
+    if (recurringFrequency === 'weekly') {
+      const dayName = turkishWeekDays[day_of_week % 7]; // 1->Pazartesi ... 7->Pazar
+      return `Bu işlem her hafta ${dayName} günü otomatik olarak tekrarlanacaktır.`;
+    }
+    if (recurringFrequency === 'monthly') {
+      return `Bu işlem her ayın ${day_of_month}. gününde otomatik olarak tekrarlanacaktır.`;
+    }
+    if (recurringFrequency === 'yearly') {
+      const monthName = turkishMonths[month_of_year - 1];
+      return `Bu işlem her yıl ${monthName} ayının ${day_of_month}. gününde otomatik olarak tekrarlanacaktır.`;
+    }
+    return 'Bu işlem otomatik olarak tekrarlanacaktır.';
+  };
+
   const colorOptions = [
     '#6C63FF', '#4ECDC4', '#FFE66D', '#48BB78', '#F56565', 
     '#ED8936', '#9F7AEA', '#38B2AC', '#ECC94B', '#FC8181'
@@ -280,9 +311,19 @@ const DetailedAddTransactionModal = ({
       // Eğer recurring transaction ise
       if (isRecurring) {
         const recurringData = {
-          ...transactionData,
+          user_id: transactionData.user_id,
+          account_id: transactionData.account_id,
+          category_id: transactionData.category_id,
+          amount: transactionData.amount,
+          type: transactionData.type,
+          description: transactionData.description,
+          notes: transactionData.notes,
           start_date: date.toISOString().split('T')[0],
-          frequency: recurringFrequency
+          frequency: recurringFrequency,
+          // Tarih alanlarını ekle
+          ...computeRecurringFieldsFromDate(date),
+          // İsim alanı için fallback, servis tarafında da mevcut ama burada da sağlam alalım
+          name: (description && description.trim()) || (selectedCategory?.name || (type === 'income' ? 'Sabit Gelir' : 'Sabit Gider')),
         };
         
         result = await recurringTransactionService.createRecurringTransaction(recurringData);
@@ -506,9 +547,9 @@ const DetailedAddTransactionModal = ({
               style={[
                 styles.colorOption,
                 { backgroundColor: color },
-                customCategoryColor === color && styles.colorOptionSelected
+                customColor === color && styles.colorOptionSelected
               ]}
-              onPress={() => setCustomCategoryColor(color)}
+              onPress={() => setCustomColor(color)}
             />
           ))}
         </ScrollView>
@@ -1058,11 +1099,7 @@ const DetailedAddTransactionModal = ({
                     <View style={styles.recurringInfo}>
                       <MaterialIcons name="info-outline" size={16} color={theme.colors.primary} />
                       <Text style={styles.recurringInfoText}>
-                        Bu işlem {
-                          recurringFrequency === 'daily' ? 'her gün' : 
-                          recurringFrequency === 'weekly' ? 'her hafta' :
-                          recurringFrequency === 'monthly' ? 'her ay' : 'her yıl'
-                        } otomatik olarak tekrarlanacaktır.
+                        {getScheduleInfoText()}
                       </Text>
                     </View>
                   </View>

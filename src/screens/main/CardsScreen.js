@@ -8,6 +8,9 @@ import { theme } from '../../styles/theme';
 // testUser artık kullanılmıyor - gerçek Supabase verileri kullanılıyor
 import { formatCurrency } from '../../utils/formatters';
 import CardSettingsModal from './CardSettingsModal';
+import { useAuth } from '../../context/AuthContext';
+import accountService from '../../services/accountService';
+import cardService from '../../services/cardService';
 
 const { width, height } = Dimensions.get('window');
 const CARD_WIDTH = width - theme.spacing.lg * 2;
@@ -40,6 +43,7 @@ const parseDateMaybe = (value) => {
 };
 
 const CardsScreen = ({ navigation }) => {
+  const { user } = useAuth();
   const [selectedCard, setSelectedCard] = useState(0);
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState(null);
@@ -266,10 +270,7 @@ const CardsScreen = ({ navigation }) => {
             {new Date(transaction.date).toLocaleDateString('tr-TR')}
           </Text>
         </View>
-        <Text style={[
-          styles.transactionAmount,
-          { color: transaction.type === 'income' ? '#48BB78' : '#F56565' }
-        ]}>
+        <Text style={styles.transactionAmount}>
           {transaction.type === 'income' ? '+' : ''}{formatCurrency(transaction.amount)}
         </Text>
       </View>
@@ -283,72 +284,123 @@ const CardsScreen = ({ navigation }) => {
 
   const recentTransactions = getRecentTransactionsForCard(selectedAccount?.id);
 
-  const handleCreateCard = () => {
+  const mapUiTypeToDbType = (type) => {
+    switch (type) {
+      case 'debit':
+      case 'multicurrency':
+      case 'fuel':
+        return 'bank';
+      case 'savings':
+      case 'prepaid':
+      case 'gift':
+        return 'wallet';
+      case 'credit':
+      case 'virtual':
+      case 'supplementary':
+      case 'business':
+        return 'credit_card';
+      default:
+        return 'bank';
+    }
+  };
+
+  const handleCreateCard = async () => {
     if (!selectedCardType) return;
-    const id = `acc-${Date.now()}`;
-    const base = {
-      id,
-      name: newCardName || getCardType(selectedCardType),
-      bankName: newBankName || 'Banka',
-      type: selectedCardType,
-      currency: newDefaultCurrency || 'TRY',
-      color: '#6C63FF',
-      icon: getCardIcon(selectedCardType),
-      isDefault: false,
-    };
-    let newAcc;
-    if (isCreditType(selectedCardType)) {
-      const limit = parseFloat(newCreditLimit) || 0;
-      newAcc = {
-        ...base,
-        balance: 0,
-        creditLimit: limit,
-        availableCredit: limit,
-        interestRate: parseFloat(newInterestRate) || 0,
-      };
-    } else if (selectedCardType === 'prepaid' || selectedCardType === 'gift') {
-      newAcc = {
-        ...base,
-        balance: parseFloat(newInitialBalance) || 0,
-      };
-    } else if (selectedCardType === 'multicurrency') {
-      newAcc = {
-        ...base,
-        balance: 0,
-        defaultCurrency: newDefaultCurrency || 'TRY',
-      };
-    } else if (selectedCardType === 'fuel') {
-      newAcc = {
-        ...base,
-        balance: 0,
-        monthlyLimit: parseFloat(newMonthlyLimit) || 0,
-      };
-    } else if (selectedCardType === 'debit') {
-      newAcc = {
-        ...base,
-        balance: parseFloat(newInitialBalance) || 0,
-      };
-    } else {
-      newAcc = { ...base, balance: 0 };
+    if (!user?.id) {
+      Alert.alert('Hata', 'Kullanıcı oturumu bulunamadı.');
+      return;
     }
 
-    const updated = [...accounts, newAcc];
-    setAccounts(updated);
-    setAddCardModalVisible(false);
-    setSelectedCard(updated.length - 1);
-    setSelectedAccount(newAcc);
-    setTimeout(() => {
-      scrollViewRef.current?.scrollTo({ x: (updated.length - 1) * (CARD_WIDTH + theme.spacing.md), animated: true });
-    }, 50);
-    setNewCardName('');
-    setNewBankName('');
-    setNewCreditLimit('');
-    setNewInterestRate('');
-    setNewInitialBalance('');
-    setNewParentCard('');
-    setNewMonthlyLimit('');
-    setNewDefaultCurrency('TRY');
-    Alert.alert('Başarılı', 'Kart eklendi');
+    setLoading(true);
+    setError(null);
+
+    const uiType = selectedCardType;
+    const dbType = mapUiTypeToDbType(uiType);
+
+    // Supabase accounts tablosu için veri hazırlama
+    const base = {
+      user_id: user.id,
+      name: newCardName || getCardType(uiType),
+      bank_name: newBankName || 'Banka',
+      type: dbType,
+      currency: newDefaultCurrency || 'TRY',
+      is_active: true,
+    };
+
+    let accountPayload = { ...base };
+
+    if (isCreditType(uiType)) {
+      const limit = parseFloat(newCreditLimit) || 0;
+      accountPayload = {
+        ...accountPayload,
+        balance: 0,
+        credit_limit: limit,
+      };
+    } else if (uiType === 'prepaid' || uiType === 'gift' || uiType === 'debit') {
+      accountPayload = {
+        ...accountPayload,
+        balance: parseFloat(newInitialBalance) || 0,
+      };
+    } else if (uiType === 'multicurrency') {
+      accountPayload = {
+        ...accountPayload,
+        balance: 0,
+      };
+    } else if (uiType === 'fuel') {
+      accountPayload = {
+        ...accountPayload,
+        balance: 0,
+      };
+    }
+
+    try {
+      const result = await cardService.createCard(accountPayload);
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Supabase kaydı başarısız');
+      }
+
+      const created = result.data;
+
+      // Ekranda göstermek için minimal UI alanları ile eşle
+      const newAccForUi = {
+        id: created.id,
+        name: created.name,
+        bankName: created.bank_name || 'Banka',
+        type: uiType,
+        currency: created.currency,
+        balance: Number(created.balance || 0),
+        creditLimit: Number(created.credit_limit || 0),
+        availableCredit: isCreditType(uiType) ? Number(created.credit_limit || 0) : undefined,
+        icon: getCardIcon(uiType),
+        color: '#6C63FF',
+        isDefault: false,
+        cardId: created.card_id, // cards tablosundaki ID
+      };
+
+      const updated = [...accounts, newAccForUi];
+      setAccounts(updated);
+      setAddCardModalVisible(false);
+      setSelectedCard(updated.length - 1);
+      setSelectedAccount(newAccForUi);
+      setTimeout(() => {
+        scrollViewRef.current?.scrollTo({ x: (updated.length - 1) * (CARD_WIDTH + theme.spacing.md), animated: true });
+      }, 50);
+      setNewCardName('');
+      setNewBankName('');
+      setNewCreditLimit('');
+      setNewInterestRate('');
+      setNewInitialBalance('');
+      setNewParentCard('');
+      setNewMonthlyLimit('');
+      setNewDefaultCurrency('TRY');
+      Alert.alert('Başarılı', 'Kart eklendi (Supabase)');
+    } catch (e) {
+      console.error('Create card (Supabase) error:', e);
+      setError(e.message);
+      Alert.alert('Hata', e.message || 'Kart oluşturulamadı');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Bakiye güncelleme fonksiyonu
@@ -440,6 +492,89 @@ const CardsScreen = ({ navigation }) => {
       checkPaymentReminder();
     }
   }, [selectedAccount]);
+
+  // Component mount olduğunda mevcut kartları yükle
+  useEffect(() => {
+    const loadExistingAccounts = async () => {
+      if (!user?.id) return;
+      
+      setLoading(true);
+      setError(null);
+      
+      try {
+        const result = await cardService.getCards(user.id);
+        if (result.success) {
+          // Her kart için accounts tablosundan detay bilgileri al
+          const accountsWithDetails = await Promise.all(
+            result.data.map(async (card) => {
+              try {
+                const accountResult = await accountService.getAccount(card.account_id);
+                if (accountResult.success) {
+                  const account = accountResult.data;
+                  return {
+                    id: account.id,
+                    name: account.name,
+                    bankName: account.bank_name || 'Banka',
+                    type: mapDbTypeToUiType(account.type),
+                    currency: account.currency || 'TRY',
+                    balance: Number(account.balance || 0),
+                    creditLimit: Number(account.credit_limit || 0),
+                    availableCredit: account.credit_limit ? Number(account.credit_limit) - Number(account.balance || 0) : undefined,
+                    icon: getCardIcon(mapDbTypeToUiType(account.type)),
+                    color: '#6C63FF',
+                    isDefault: false,
+                    dueDate: account.due_date,
+                    interestRate: account.interest_rate,
+                    monthlyLimit: account.monthly_limit,
+                    parentCard: account.parent_card,
+                    cardId: card.id, // cards tablosundaki ID
+                  };
+                } else {
+                  console.warn(`Account ${card.account_id} not found for card ${card.id}`);
+                  return null;
+                }
+              } catch (error) {
+                console.warn(`Error loading account for card ${card.id}:`, error);
+                return null;
+              }
+            })
+          );
+
+          // Null değerleri filtrele
+          const validAccounts = accountsWithDetails.filter(acc => acc !== null);
+          setAccounts(validAccounts);
+          
+          // İlk kartı seç
+          if (validAccounts.length > 0 && !selectedAccount) {
+            setSelectedAccount(validAccounts[0]);
+          }
+        } else {
+          setError(result.error || 'Kartlar yüklenemedi');
+        }
+      } catch (error) {
+        console.error('Load accounts error:', error);
+        setError('Kartlar yüklenirken hata oluştu');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadExistingAccounts();
+  }, [user?.id]);
+
+  // DB tipini UI tipine çeviren yardımcı fonksiyon
+  const mapDbTypeToUiType = (dbType) => {
+    switch (dbType) {
+      case 'credit_card':
+        return 'credit';
+      case 'bank':
+        return 'debit';
+      case 'wallet':
+        return 'prepaid';
+      default:
+        return dbType;
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -713,32 +848,6 @@ const CardsScreen = ({ navigation }) => {
             </View>
           </View>
         )}
-
-        {/* Quick Actions */}
-        <View style={styles.quickActionsContainer}>
-          <Text style={styles.sectionTitle}>Hızlı İşlemler</Text>
-          <View style={styles.quickActionsGrid}>
-            <TouchableOpacity style={styles.quickActionCard}>
-              <MaterialIcons name="receipt" size={24} color={theme.colors.primary} />
-              <Text style={styles.quickActionText}>Fiş Tara</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.quickActionCard}>
-              <MaterialIcons name="add-circle" size={24} color={theme.colors.primary} />
-              <Text style={styles.quickActionText}>İşlem Ekle</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.quickActionCard}>
-              <MaterialIcons name="history" size={24} color={theme.colors.primary} />
-              <Text style={styles.quickActionText}>Geçmiş</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.quickActionCard}>
-              <MaterialIcons name="settings" size={24} color={theme.colors.primary} />
-              <Text style={styles.quickActionText}>Ayarlar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
       </ScrollView>
       
       {/* Card Settings Modal */}
@@ -1381,39 +1490,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   
-  quickActionsContainer: {
-    paddingHorizontal: theme.spacing.lg,
-    paddingBottom: theme.spacing.xl,
-  },
-  
-  quickActionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  
-  quickActionCard: {
-    width: '48%',
-    backgroundColor: theme.colors.cards,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.lg,
-    alignItems: 'center',
-    marginBottom: theme.spacing.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  
-  quickActionText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: theme.colors.textPrimary,
-    marginTop: theme.spacing.sm,
-    textAlign: 'center',
-  },
-
   // Card Details Styles
   cardDetailsContainer: {
     paddingHorizontal: theme.spacing.lg,
