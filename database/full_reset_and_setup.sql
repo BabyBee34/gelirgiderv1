@@ -75,8 +75,13 @@ CREATE TABLE public.transactions (
   amount numeric(15,2) not null,
   description text,
   date date not null,
+  time time,
+  location text,
+  receipt_url text,
+  tags text[],
   is_recurring boolean default false,
   recurring_transaction_id uuid, -- Will reference recurring_transactions table
+  recurring_frequency text check (recurring_frequency in ('daily', 'weekly', 'monthly', 'quarterly', 'yearly')),
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -196,6 +201,16 @@ CREATE TABLE public.notification_history (
   updated_at timestamptz default now()
 );
 
+-- Create migration_log table
+CREATE TABLE public.migration_log (
+  id uuid primary key default uuid_generate_v4(),
+  migration_name text not null unique,
+  executed_at timestamptz default now(),
+  status text default 'success' check (status in ('success', 'failed', 'pending')),
+  details text,
+  execution_time_ms integer
+);
+
 -- Create indexes
 CREATE INDEX idx_categories_user_type ON public.categories(user_id, type);
 CREATE INDEX idx_accounts_user_primary ON public.accounts(user_id, is_primary);
@@ -205,6 +220,9 @@ CREATE INDEX idx_recurring_transactions_next_due ON public.recurring_transaction
 CREATE INDEX idx_goals_user_active ON public.goals(user_id, is_active);
 CREATE INDEX idx_budgets_user_active ON public.budgets(user_id, is_active);
 CREATE INDEX idx_notification_history_user_status ON public.notification_history(user_id, status);
+CREATE INDEX idx_migration_log_name ON public.migration_log(migration_name);
+CREATE INDEX idx_migration_log_status ON public.migration_log(status);
+CREATE INDEX idx_migration_log_executed_at ON public.migration_log(executed_at);
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
@@ -263,6 +281,11 @@ CREATE POLICY "Users can insert own notifications" ON public.notification_histor
 CREATE POLICY "Users can update own notifications" ON public.notification_history FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "Users can delete own notifications" ON public.notification_history FOR DELETE USING (auth.uid() = user_id);
 
+CREATE POLICY "Users can view migration log" ON public.migration_log FOR SELECT USING (true);
+CREATE POLICY "Users can insert migration log" ON public.migration_log FOR INSERT WITH CHECK (true);
+CREATE POLICY "Users can update migration log" ON public.migration_log FOR UPDATE USING (true);
+CREATE POLICY "Users can delete migration log" ON public.migration_log FOR DELETE USING (true);
+
 -- Create function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -282,6 +305,7 @@ CREATE TRIGGER update_goals_updated_at BEFORE UPDATE ON public.goals FOR EACH RO
 CREATE TRIGGER update_budgets_updated_at BEFORE UPDATE ON public.budgets FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE ON public.user_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_notification_history_updated_at BEFORE UPDATE ON public.notification_history FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_migration_log_updated_at BEFORE UPDATE ON public.migration_log FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Create function to calculate next due date for recurring transactions
 CREATE OR REPLACE FUNCTION calculate_next_due_date(

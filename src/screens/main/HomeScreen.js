@@ -1912,22 +1912,19 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.error,
   },
 
-  balanceCard: {
-    marginHorizontal: 0,
-    marginTop: theme.spacing.md, // Üst margin ekle - header'dan uzaklaştır
-    marginBottom: theme.spacing.xl,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.lg,
-    elevation: 8,
-    shadowColor: theme.colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    minHeight: 240,
-    height: 240,
-    justifyContent: 'space-between',
-    overflow: 'visible',
-  },
+      balanceCard: {
+      borderRadius: theme.borderRadius.lg,
+      padding: theme.spacing.lg,
+      elevation: 8,
+      shadowColor: theme.colors.primary,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      minHeight: 240,
+      height: 240,
+      justifyContent: 'space-between',
+      overflow: 'visible',
+    },
 
   balanceHeader: {
     flexDirection: 'row',
@@ -2444,12 +2441,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.screen.isSmall ? theme.spacing.md : theme.screen.isMedium ? theme.spacing.lg : theme.spacing.xl,
     overflow: 'visible',
   },
-  topCard: {
-    marginRight: CARD_SPACING,
-    // Her iki kartın da aynı boyutta olması için
-    height: 240, // 220'den 240'a çıkar
-    minHeight: 240, // 220'den 240'a çıkar
-  },
+      topCard: {
+      marginRight: CARD_SPACING,
+      height: 240,
+      minHeight: 240,
+    },
   assetsCard: {
     backgroundColor: 'transparent',
     // Varlıklar kartının da aynı boyutta olması için
@@ -2888,11 +2884,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'stretch',
     minWidth: '100%',
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.lg,
   },
   
   cardWrapper: {
     marginRight: CARD_SPACING,
-    marginTop: theme.spacing.sm, // Üst margin ekle
     alignItems: 'center',
     justifyContent: 'center',
     width: CARD_WIDTH,

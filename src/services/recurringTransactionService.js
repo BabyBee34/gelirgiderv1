@@ -125,8 +125,8 @@ const recurringTransactionService = {
       };
     } catch (error) {
       console.error('createRecurringTransaction genel hata:', error);
-      return {
-        success: false,
+      return { 
+        success: false, 
         error: error.message,
         data: null
       };
@@ -243,8 +243,8 @@ const recurringTransactionService = {
       };
     } catch (error) {
       console.error('updateRecurringTransaction genel hata:', error);
-      return {
-        success: false,
+      return { 
+        success: false, 
         error: error.message,
         data: null
       };
@@ -579,8 +579,8 @@ const recurringTransactionService = {
 
       if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
         console.error('Supabase getUserSettings error:', error);
-        return {
-          success: false,
+      return { 
+        success: false, 
           error: error.message,
           data: null
         };
@@ -734,8 +734,8 @@ const recurringTransactionService = {
 
       if (error) {
         console.error('Supabase createConfirmationNotification error:', error);
-        return {
-          success: false,
+      return { 
+        success: false, 
           error: error.message
         };
       }

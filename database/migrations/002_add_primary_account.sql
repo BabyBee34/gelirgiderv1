@@ -39,7 +39,7 @@ BEGIN
         AND table_schema = 'public'
     ) THEN
         -- Note: This creates a partial unique index instead of constraint to allow multiple false values
-        CREATE UNIQUE INDEX CONCURRENTLY accounts_one_primary_per_user 
+        CREATE UNIQUE INDEX accounts_one_primary_per_user 
         ON public.accounts (user_id) 
         WHERE is_primary = true;
         
@@ -122,11 +122,11 @@ BEGIN
     -- Insert transaction
     INSERT INTO public.transactions (
         user_id, account_id, category_id, amount, type, description, 
-        notes, date, time, location, receipt_url, tags, 
+        date, time, location, receipt_url, tags, 
         is_recurring, recurring_frequency
     ) VALUES (
         p_user_id, p_account_id, p_category_id, p_amount, p_type, p_description,
-        p_notes, p_date, p_time, p_location, p_receipt_url, p_tags,
+        p_date, p_time, p_location, p_receipt_url, p_tags,
         p_is_recurring, p_recurring_frequency
     ) RETURNING id INTO v_transaction_id;
     
